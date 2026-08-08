@@ -1,9 +1,12 @@
 ﻿using ToyDb;
 
+var dbLocation = @"C:/users/josephbates/file.toydb";
+
 Console.WriteLine("Hello, ToyDb!");
 
-var database = Database.Initialize("file.db");
-
-
-public readonly record struct PageNumber(int Value);
-public readonly record struct DatabaseVersion(int Value);
+var d = Database.Initialize(dbLocation);
+d.Dispose();
+var database = Database.Open(dbLocation);
+Console.WriteLine(
+    $"Version: {database.Header.Version} Page Directory= {database.Header.PageDirectoryPageNumber}, TableDirectory = {database.Header.TableDirectoryPageNumber}");
+    

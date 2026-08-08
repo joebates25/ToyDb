@@ -6,10 +6,18 @@ using Microsoft.Win32.SafeHandles;
 
 namespace ToyDb;
 
-public class Database
+public class Database : IDisposable
 {
-    static readonly int Version = 1;
-    const string DbIdentifier = "Welcome to ToyDb!"; 
+    private const int EngineVersion = 2;
+    public DatabaseHeader Header { get; set; }
+
+    private readonly SafeFileHandle _safeFileHandle;
+
+    private Database(SafeFileHandle safeFileHandle, DatabaseHeader header)
+    {
+        _safeFileHandle = safeFileHandle;
+        Header         = header;
+    }
 
     public static Database Initialize(string filePath)
     {
@@ -18,27 +26,58 @@ public class Database
             throw new Exception("The file already exists. Try using Open()");
         }
 
-        Span<byte> headerBytes = stackalloc byte[29];
-        
+        var headerBytes = (Span<byte>) stackalloc byte[29];
+
         "Welcome to ToyDb!"u8.CopyTo(headerBytes);
 
-        BinaryPrimitives.WriteInt32LittleEndian(headerBytes[17..], Version);
+        BinaryPrimitives.WriteInt32LittleEndian(headerBytes[17..], EngineVersion);
         BinaryPrimitives.WriteInt32LittleEndian(headerBytes[21..], 0);
         BinaryPrimitives.WriteInt32LittleEndian(headerBytes[25..], 0);
 
-        using var safeHandle = File.OpenHandle(filePath, FileMode.Create, FileAccess.Write, FileShare.None);
+        var safeHandle = File.OpenHandle(filePath, FileMode.Create, FileAccess.ReadWrite, FileShare.ReadWrite);
 
         RandomAccess.Write(safeHandle, headerBytes, 0);
-        
+
         RandomAccess.FlushToDisk(safeHandle);
-        
-        return new Database();
+
+        return new Database(safeHandle, new DatabaseHeader
+        {
+            Version                  = EngineVersion,
+            PageDirectoryPageNumber  = 0,
+            TableDirectoryPageNumber = 0
+        });
     }
 
     public static Database Open(string filePath)
     {
-        Console.WriteLine("Pretending to open a database");
-        return new Database();
+        if (!File.Exists(filePath))
+        {
+            throw new Exception("File not found.");
+        }
+
+        var safeHandle = File.OpenHandle(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
+        var headerBytes = (Span<byte>) stackalloc byte[29];
+        RandomAccess.Read(safeHandle, headerBytes, 0);
+
+        var welcomeValid = "Welcome to ToyDb!"u8.SequenceEqual(headerBytes[..17]);
+        if (!welcomeValid) throw new Exception("Invalid database format.");
+
+        var version = BinaryPrimitives.ReadInt32LittleEndian(headerBytes[17..]);
+        var pageDirectoryPageNumber = BinaryPrimitives.ReadInt32LittleEndian(headerBytes[21..]);
+        var tableDirectoryPageNumber = BinaryPrimitives.ReadInt32LittleEndian(headerBytes[25..]);
+
+        return new Database(safeHandle,
+            new DatabaseHeader
+            {
+                Version                  = version,
+                PageDirectoryPageNumber  = pageDirectoryPageNumber,
+                TableDirectoryPageNumber = tableDirectoryPageNumber
+            });
+    }
+
+    public void Dispose()
+    {
+        _safeFileHandle.Dispose();
     }
 }
 
