@@ -1,7 +1,5 @@
 ﻿using System.Buffers.Binary;
-using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
-using System.Runtime.InteropServices.JavaScript;
+using System.Diagnostics;
 using Microsoft.Win32.SafeHandles;
 
 namespace ToyDb;
@@ -16,7 +14,7 @@ public class Database : IDisposable
     private Database(SafeFileHandle safeFileHandle, DatabaseHeader header)
     {
         _safeFileHandle = safeFileHandle;
-        Header         = header;
+        Header          = header;
     }
 
     public static Database Initialize(string filePath)
@@ -26,7 +24,7 @@ public class Database : IDisposable
             throw new Exception("The file already exists. Try using Open()");
         }
 
-        var headerBytes = (Span<byte>) stackalloc byte[29];
+        var headerBytes = (Span<byte>) stackalloc byte[Constants.PageSizeBytes];
 
         "Welcome to ToyDb!"u8.CopyTo(headerBytes);
 
@@ -48,7 +46,7 @@ public class Database : IDisposable
         });
     }
 
-    public static Database Open(string filePath)
+    public static async Task<Database> OpenAsync(string filePath)
     {
         if (!File.Exists(filePath))
         {
@@ -56,22 +54,18 @@ public class Database : IDisposable
         }
 
         var safeHandle = File.OpenHandle(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
-        var headerBytes = (Span<byte>) stackalloc byte[29];
-        RandomAccess.Read(safeHandle, headerBytes, 0);
-
-        var welcomeValid = "Welcome to ToyDb!"u8.SequenceEqual(headerBytes[..17]);
+        
+        var pageBuffer = new PageBuffer(safeHandle);
+        var headerPage = (await pageBuffer.GetPageAsync(0)).AsHeaderPage();
+        var welcomeValid = headerPage.WelcomeMessage == Constants.WelcomeMessage;
         if (!welcomeValid) throw new Exception("Invalid database format.");
-
-        var version = BinaryPrimitives.ReadInt32LittleEndian(headerBytes[17..]);
-        var pageDirectoryPageNumber = BinaryPrimitives.ReadInt32LittleEndian(headerBytes[21..]);
-        var tableDirectoryPageNumber = BinaryPrimitives.ReadInt32LittleEndian(headerBytes[25..]);
 
         return new Database(safeHandle,
             new DatabaseHeader
             {
-                Version                  = version,
-                PageDirectoryPageNumber  = pageDirectoryPageNumber,
-                TableDirectoryPageNumber = tableDirectoryPageNumber
+                Version                  = headerPage.Version,
+                PageDirectoryPageNumber  = headerPage.PageDirectoryPageNumber,
+                TableDirectoryPageNumber = headerPage.TableDirectoryPageNumber
             });
     }
 
