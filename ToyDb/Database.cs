@@ -17,26 +17,25 @@ public class Database : IDisposable
         Header          = header;
     }
 
-    public static Database Initialize(string filePath)
+    public static async Task<Database> Initialize(string filePath)
     {
         if (File.Exists(filePath))
         {
             throw new Exception("The file already exists. Try using Open()");
         }
-
-        var headerBytes = (Span<byte>) stackalloc byte[Constants.PageSizeBytes];
-
-        "Welcome to ToyDb!"u8.CopyTo(headerBytes);
-
-        BinaryPrimitives.WriteInt32LittleEndian(headerBytes[17..], EngineVersion);
-        BinaryPrimitives.WriteInt32LittleEndian(headerBytes[21..], 0);
-        BinaryPrimitives.WriteInt32LittleEndian(headerBytes[25..], 0);
-
+        
         var safeHandle = File.OpenHandle(filePath, FileMode.Create, FileAccess.ReadWrite, FileShare.ReadWrite);
+        
+        var pageBuffer = new PageBuffer(safeHandle);
+        var newHeaderPage = pageBuffer
+            .AllocatePage(0)
+            .AsHeaderPage();
 
-        RandomAccess.Write(safeHandle, headerBytes, 0);
+        newHeaderPage.SetVersion(EngineVersion);
+        newHeaderPage.SetPageDirectoryPageNumber(0);
+        newHeaderPage.SetTableDirectoryPageNumber(0);
 
-        RandomAccess.FlushToDisk(safeHandle);
+        await pageBuffer.FlushAsync();
 
         return new Database(safeHandle, new DatabaseHeader
         {
@@ -56,7 +55,7 @@ public class Database : IDisposable
         var safeHandle = File.OpenHandle(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
         
         var pageBuffer = new PageBuffer(safeHandle);
-        var headerPage = (await pageBuffer.GetPageAsync(0)).AsHeaderPage();
+        var headerPage = (await pageBuffer.ReadPageAsync(0)).AsHeaderPage();
         var welcomeValid = headerPage.WelcomeMessage == Constants.WelcomeMessage;
         if (!welcomeValid) throw new Exception("Invalid database format.");
 
