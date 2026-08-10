@@ -4,7 +4,7 @@ namespace ToyDb;
 
 public class PageBuffer(SafeFileHandle safeHandle)
 {
-    private readonly Memory<byte> _shittyBigAssBuffer = new byte[Constants.PageSizeBytes * 10_000];
+    private readonly Memory<byte> _shittyBigAssBuffer = new byte[Constants.PageSizeBytes * 2_000];
     private readonly Dictionary<int, bool> _pageBufferTable = new();
 
     public async Task<Page> ReadPageAsync(int pageNumber)

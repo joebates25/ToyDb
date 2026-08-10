@@ -29,7 +29,7 @@ public class Database : IDisposable
         var pageBuffer = new PageBuffer(safeHandle);
         var newHeaderPage = pageBuffer
             .AllocatePage(0)
-            .AsHeaderPage();
+            .AsDatabaseHeaderPage();
 
         newHeaderPage.SetVersion(EngineVersion);
         newHeaderPage.SetPageDirectoryPageNumber(0);
@@ -55,7 +55,7 @@ public class Database : IDisposable
         var safeHandle = File.OpenHandle(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
         
         var pageBuffer = new PageBuffer(safeHandle);
-        var headerPage = (await pageBuffer.ReadPageAsync(0)).AsHeaderPage();
+        var headerPage = (await pageBuffer.ReadPageAsync(0)).AsDatabaseHeaderPage();
         var welcomeValid = headerPage.WelcomeMessage == Constants.WelcomeMessage;
         if (!welcomeValid) throw new Exception("Invalid database format.");
 
@@ -71,6 +71,11 @@ public class Database : IDisposable
     public void Dispose()
     {
         _safeFileHandle.Dispose();
+    }
+
+    public void AddSchema(Schema schema)
+    {
+        throw new NotImplementedException();
     }
 }
 
