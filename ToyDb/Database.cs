@@ -31,9 +31,13 @@ public class Database : IDisposable
             .AllocatePage(0)
             .AsDatabaseHeaderPage();
 
+        var newSchemaDirectoryPage = pageBuffer
+            .AllocatePage(1)
+            .AsSchemaDirectoryPage();
+
         newHeaderPage.SetVersion(EngineVersion);
         newHeaderPage.SetPageDirectoryPageNumber(0);
-        newHeaderPage.SetTableDirectoryPageNumber(0);
+        newHeaderPage.SetSchemaDirectoryPageNumber(1);
 
         await pageBuffer.FlushAsync();
 
@@ -41,7 +45,7 @@ public class Database : IDisposable
         {
             Version                  = EngineVersion,
             PageDirectoryPageNumber  = 0,
-            TableDirectoryPageNumber = 0
+            SchemaDirectoryPageNumber = 0
         });
     }
 
@@ -64,7 +68,7 @@ public class Database : IDisposable
             {
                 Version                  = headerPage.Version,
                 PageDirectoryPageNumber  = headerPage.PageDirectoryPageNumber,
-                TableDirectoryPageNumber = headerPage.TableDirectoryPageNumber
+                SchemaDirectoryPageNumber = headerPage.SchemaDirectoryPageNumber
             });
     }
 
@@ -83,5 +87,5 @@ public record DatabaseHeader
 {
     public int Version { get; init; }
     public int PageDirectoryPageNumber { get; init; }
-    public int TableDirectoryPageNumber { get; init; }
+    public int SchemaDirectoryPageNumber { get; init; }
 }

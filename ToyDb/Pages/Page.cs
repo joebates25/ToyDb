@@ -1,4 +1,6 @@
-﻿namespace ToyDb;
+﻿using ToyDb.Pages;
+
+namespace ToyDb;
 
 public class Page(Memory<byte> data)
 {
@@ -10,5 +12,10 @@ public class Page(Memory<byte> data)
     public DatabaseHeaderPage AsDatabaseHeaderPage()
     {
         return new DatabaseHeaderPage(Data);
+    }
+    
+    public SchemaDirectoryPage AsSchemaDirectoryPage()
+    {
+        return new SchemaDirectoryPage(Data);
     }
 }
