@@ -1,26 +1,95 @@
-﻿namespace ToyDb.Pages;
+﻿using System.Buffers.Binary;
+using System.Text;
+
+namespace ToyDb.Pages;
 
 public class SchemaPage(Memory<byte> data) : Page(data)
-
 {
-    // default length 128 no matter what -- padded
-    public string Name { get; set; }
-    public int NumFields { get; private set; }
-    public SchemaPageField[] Fields = [];
+    /* Some specs:
+        Max Schema name length: 128
+        Max num fields: ~31
+        Max field name length: 128
+        Max field size: 255
 
-    public void AddField(string name, Type type, int length, int numFields)
+        Schema page layout (4096 bytes):
+        +---------------------------+ byte 0
+        | Name (128 bytes)          |
+        +---------------------------+ byte 128
+        | FieldCount (4 bytes, LE)  |
+        +---------------------------+ byte 132
+        | Fields (130 bytes each)   |
+        |   +---------------------+ |
+        |   | Name (128 bytes)    | |
+        |   +---------------------+ |
+        |   | Type (1 byte)       | |
+        |   +---------------------+ |
+        |   | Length (1 byte)     | |
+        |   +---------------------+ |
+        +---------------------------+
+     */
+    private const int NameLengthBytes = 128;
+    private const int FieldCountOffset = NameLengthBytes;
+    private const int FieldsOffset = FieldCountOffset + sizeof(int);
+
+    // default length 128 no matter what -- padded
+    public string Name
     {
+        get => Encoding.UTF8.GetString(Data.Span[..NameLengthBytes]).TrimEnd('\0');
+        set
+        {
+            Data.Span[..NameLengthBytes].Clear();
+            Encoding.UTF8.GetBytes(value).CopyTo(Data.Span[..NameLengthBytes]);
+        }
     }
 
-    public void ClearFields()
+    public int FieldCount
     {
-        NumFields = 0;
+        get => BinaryPrimitives.ReadInt32LittleEndian(Data.Span[FieldCountOffset..]);
+        private set => BinaryPrimitives.WriteInt32LittleEndian(Data.Span[FieldCountOffset..], value);
+    }
+
+    public SchemaPageField[] Fields
+    {
+        get
+        {
+            var fields = new SchemaPageField[FieldCount];
+            var offset = 0;
+
+            for (var i = 0; i < fields.Length; i++)
+            {
+                var fieldSlot = Data.Span.Slice(FieldsOffset + i * FieldSizeBytes, FieldSizeBytes);
+                var name = Encoding.UTF8.GetString(fieldSlot[..NameLengthBytes]).TrimEnd('\0');
+                var type = (SchemaPageFieldType)fieldSlot[NameLengthBytes];
+                var length = fieldSlot[NameLengthBytes + 1];
+
+                fields[i] = new SchemaPageField(name, type, length, offset);
+                offset += length;
+            }
+
+            return fields;
+        }
+    }
+
+    // Field size = 128 (name) + 1 (type) + 1 (length) = 130
+    private const int FieldSizeBytes = 128 + 1 + 1;
+
+    public void AddField(string name, SchemaPageFieldType type, byte length)
+    {
+        if (FieldCount == 31) throw new ArgumentOutOfRangeException(nameof(FieldCount));
+
+        var fieldSlot = data.Span.Slice(FieldsOffset + FieldCount * FieldSizeBytes, FieldSizeBytes);
+        fieldSlot.Clear();
+        Encoding.UTF8.GetBytes(name).CopyTo(fieldSlot);
+        fieldSlot[NameLengthBytes] = (byte)type;
+        fieldSlot[NameLengthBytes + 1] = length;
+
+        FieldCount++;
     }
 }
 
 public record SchemaPageField(string Name, SchemaPageFieldType Type, int Length, int Offset);
 
-public enum SchemaPageFieldType
+public enum SchemaPageFieldType : byte
 {
     Integer,
     Boolean,

@@ -6,7 +6,7 @@ Console.WriteLine("Hello, ToyDb!");
 
 var d = Database.Initialize(dbLocation);
 d.Dispose();
-var database = await Database.OpenAsync(dbLocation);
+var database = Database.Open(dbLocation);
 var schema = new Schema("MySchema")
     .AddField("Name", SchemaFieldType.String, 10)
     .AddField("Count", SchemaFieldType.Integer, 4)

@@ -18,4 +18,9 @@ public class Page(Memory<byte> data)
     {
         return new SchemaDirectoryPage(Data);
     }
+    
+    public SchemaPage AsSchemaPage()
+    {
+        return new SchemaPage(Data);
+    }
 }
