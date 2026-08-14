@@ -49,11 +49,11 @@ public class Database : IDisposable
 
         var newHeaderPage = pageBuffer
             .AllocatePage<DatabaseHeaderPage>(0);
-        newHeaderPage.SetVersion(EngineVersion);
-        newHeaderPage.SetPageCount(0); //todo: update once we get a real page directory
+        newHeaderPage.Version   = EngineVersion;
 
         pageBuffer.AllocatePage<SchemaDirectoryPage>(SchemaDirectoryPageNumber);
-        newHeaderPage.SetSchemaDirectoryPageNumber(SchemaDirectoryPageNumber);
+        newHeaderPage.SchemaDirectoryPageNumber = SchemaDirectoryPageNumber;
+        newHeaderPage.PageCount = 2; 
 
         await pageBuffer.FlushAsync();
     }
@@ -62,24 +62,29 @@ public class Database : IDisposable
         !File.Exists(filePath)
             ? throw new Exception("File not found.")
             : new Database(filePath);
+    
+    public Task CloseAsync() => _pageBufferManager.FlushAsync();
 
-    public void Dispose() => _pageBufferManager.Dispose();
+    public void Dispose() {
+        _pageBufferManager.Dispose();
+    }
 
     public async Task AddSchemaAsync(Schema schema)
     {
+        var headerPage = await _pageBufferManager.ReadPageAsync<DatabaseHeaderPage>(0);
+
         // get schema directory page
         var schemaDirectoryPage =
             await _pageBufferManager.ReadPageAsync<SchemaDirectoryPage>(SchemaDirectoryPageNumber);
-        
-        
+
+        var newPageCount = ++headerPage.PageCount;
         // allocate a new schema page from page buffer
-        // todo: (but how do we know most recently free page???
-        var schemaPage = _pageBufferManager.AllocatePage<SchemaPage>(2); // todo: no longer hard code to 2
-        
+        var schemaPage = _pageBufferManager.AllocatePage<SchemaPage>(newPageCount);
+
         // todo: validate name as valid
         // add info schema object to page
         schemaPage.Name = schema.Name;
-        
+
         foreach (var schemaField in schema.Fields)
         {
             // todo: map better
@@ -101,7 +106,19 @@ public class Database : IDisposable
         }
 
         // update schema directory page with new schema location
-        schemaDirectoryPage.InsertSchemaDirectoryEntry(2); // todo: still hard coded. dang
+        schemaDirectoryPage.InsertSchemaDirectoryEntry(newPageCount);
+
+        var newDataPageNumber = ++headerPage.PageCount;
+        _pageBufferManager.AllocatePage<DataPage>(newDataPageNumber);
+        schemaPage.FirstDataPageNumber = newDataPageNumber;
+    }
+
+    public async Task Query()
+    {
+        var header = await _pageBufferManager.ReadPageAsync<DatabaseHeaderPage>(0);
+        var schemaDirectoryPage = await _pageBufferManager.ReadPageAsync<SchemaDirectoryPage>(header.SchemaDirectoryPageNumber);
+        var schema = await _pageBufferManager.ReadPageAsync<SchemaPage>(schemaDirectoryPage.NonDeletedSchemaPageNumbers[0]);
+        Console.WriteLine(header.SchemaDirectoryPageNumber);
     }
 }
 

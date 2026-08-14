@@ -22,7 +22,7 @@ public class PageBufferManager(FileIoManager fileIoManager, PageBufferConfig? pa
 
     public TPage AllocatePage<TPage>(int pageNumber) where TPage : Page, IPageFactory<TPage>
     {
-        if (_pageBufferTable.ContainsKey(pageNumber)) throw new InvalidOperationException("Page already allocated");
+        if (_pageBufferTable.ContainsKey(pageNumber)) throw new InvalidOperationException($"Page {pageNumber} already allocated");
 
         // todo: Consider clearing buffer slot
         var bufferSlice = _shittyBigAssBuffer.Slice(pageNumber * Constants.PageSizeBytes, Constants.PageSizeBytes);

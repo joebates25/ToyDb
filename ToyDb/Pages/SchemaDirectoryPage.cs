@@ -32,7 +32,9 @@ public class SchemaDirectoryPage(Memory<byte> data) : Page(data), IPageFactory<S
     }
 
     public int[] SchemaPageNumbers =>
-        MemoryMarshal.Cast<byte, int>(Data.Span[(NumTablesOffset + 4)..(NumTables * Constants.PageNumberSize)])
+        MemoryMarshal.Cast<byte, int>(
+                Data.Span[(NumTablesOffset + sizeof(int))..
+                    (NumTablesOffset + sizeof(int) + NumTables * Constants.PageNumberSize)])
             .ToArray();
 
     public int[] NonDeletedSchemaPageNumbers => SchemaPageNumbers.Where(x => x != DeletedTableValue).ToArray();
@@ -41,7 +43,7 @@ public class SchemaDirectoryPage(Memory<byte> data) : Page(data), IPageFactory<S
     {
         BinaryPrimitives.WriteInt32LittleEndian(
             Data.Span[((NumTablesOffset + 4) + NumTables * Constants.PageNumberSize)..], pageNum);
-        NumTables++;
+        ++NumTables;
     }
 
     public void ClearSchemaDirectoryEntry(int entrySlot)
