@@ -3,12 +3,29 @@ using System.Text;
 
 namespace ToyDb;
 
+/// <summary>
+/// Contains the basic information about the database for functioning
+/// </summary>
 public class DatabaseHeaderPage : Page
 {
+    /*
+        Database header page layout (4096 bytes):
+        +-------------------------------------------+ byte 0
+        | WelcomeMessage (17 bytes, UTF-8)          |
+        +-------------------------------------------+ byte 17
+        | Version (4 bytes, LE)                     |
+        +-------------------------------------------+ byte 21
+        | PageCount (4 bytes, LE)     |
+        +-------------------------------------------+ byte 25
+        | SchemaDirectoryPageNumber (4 bytes, LE)   |
+        +-------------------------------------------+ byte 29
+        | Unused                                    |
+        +-------------------------------------------+ byte 4096
+    */
     private const int WelcomeMessageLength = 17;
 
     private const int VersionOffset = 17;
-    private const int PageDirectoryOffset = 21;
+    private const int PageCountOffset = 21;
     private const int SchemaDirectoryOffset = 25;
 
     public DatabaseHeaderPage(Memory<byte> data) : base(data)
@@ -23,10 +40,10 @@ public class DatabaseHeaderPage : Page
     public void SetVersion(int version) =>
         BinaryPrimitives.WriteInt32LittleEndian(Data.Span[VersionOffset..], version);
 
-    public int PageDirectoryPageNumber => BinaryPrimitives.ReadInt32LittleEndian(Data.Span[PageDirectoryOffset..]);
+    public int PageCount => BinaryPrimitives.ReadInt32LittleEndian(Data.Span[PageCountOffset..]);
 
-    public void SetPageDirectoryPageNumber(int pageDirectoryPageNumber) =>
-        BinaryPrimitives.WriteInt32LittleEndian(Data.Span[PageDirectoryOffset..], pageDirectoryPageNumber);
+    public void SetPageCount(int PageCount) =>
+        BinaryPrimitives.WriteInt32LittleEndian(Data.Span[PageCountOffset..], PageCount);
 
     public int SchemaDirectoryPageNumber => BitConverter.ToInt32(Data.Span[SchemaDirectoryOffset..]);
 

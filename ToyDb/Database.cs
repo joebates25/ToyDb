@@ -1,7 +1,4 @@
-﻿using System.Buffers.Binary;
-using System.Diagnostics;
-using Microsoft.Win32.SafeHandles;
-using ToyDb.Pages;
+﻿using ToyDb.Pages;
 
 namespace ToyDb;
 
@@ -13,9 +10,7 @@ public class Database : IDisposable
 
     public DatabaseInfo Info { get; set; }
 
-    private readonly SafeFileHandle _safeFileHandle;
-
-    private readonly PageBuffer _pageBuffer;
+    private readonly PageBufferManager _pageBufferManager;
 
     /*
      * Init todo list:
@@ -25,39 +20,39 @@ public class Database : IDisposable
      *
      * return initialized database object
      */
-    private Database(SafeFileHandle safeFileHandle)
+    private Database(string filePath)
     {
-        _safeFileHandle = safeFileHandle;
-
-        _pageBuffer = new PageBuffer(_safeFileHandle);
-        var headerPage = _pageBuffer.ReadPageAsync(0).Result.AsDatabaseHeaderPage();
+        _pageBufferManager = new PageBufferManager(
+            new FileIoManager(filePath),
+            pageBufferConfig: new PageBufferConfig(FrameCount: 2_000));
+        var headerPage = _pageBufferManager.ReadPageAsync(0).Result.AsDatabaseHeaderPage();
         var welcomeValid = headerPage.WelcomeMessage == Constants.WelcomeMessage;
         if (!welcomeValid) throw new Exception("Invalid database format.");
 
         Info = new DatabaseInfo
         {
             Version                   = headerPage.Version,
-            PageDirectoryPageNumber   = headerPage.PageDirectoryPageNumber,
+            PageCount                 = headerPage.PageCount,
             SchemaDirectoryPageNumber = headerPage.SchemaDirectoryPageNumber
         };
     }
 
-    public static async Task Initialize(string filePath)
+    public static async Task InitializeAsync(string filePath)
     {
         if (File.Exists(filePath))
         {
             throw new Exception("The file already exists. Try using Open()");
         }
 
-        var safeHandle = File.OpenHandle(filePath, FileMode.Create, FileAccess.ReadWrite, FileShare.ReadWrite);
-        var pageBuffer = new PageBuffer(safeHandle);
+        using var pageBuffer = new PageBufferManager(new FileIoManager(filePath),
+            pageBufferConfig: new PageBufferConfig(FrameCount: 20)); // only need a small buffer to init db
 
         var newHeaderPage = pageBuffer
             .AllocatePage(0)
             .AsDatabaseHeaderPage();
         newHeaderPage.SetVersion(EngineVersion);
-        newHeaderPage.SetPageDirectoryPageNumber(0); //todo: update once we get a real page directory
-        
+        newHeaderPage.SetPageCount(0); //todo: update once we get a real page directory
+
         pageBuffer
             .AllocatePage(SchemaDirectoryPageNumber)
             .AsSchemaDirectoryPage();
@@ -66,31 +61,22 @@ public class Database : IDisposable
         await pageBuffer.FlushAsync();
     }
 
-    public static Database Open(string filePath)
-    {
-        if (!File.Exists(filePath))
-        {
-            throw new Exception("File not found.");
-        }
+    public static Database Open(string filePath) =>
+        !File.Exists(filePath)
+            ? throw new Exception("File not found.")
+            : new Database(filePath);
 
-        var safeHandle = File.OpenHandle(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
+    public void Dispose() => _pageBufferManager.Dispose();
 
-        return new Database(safeHandle);
-    }
-
-    public void Dispose()
-    {
-        _safeFileHandle.Dispose();
-    }
-
-    public async Task AddSchema(Schema schema)
+    public async Task AddSchemaAsync(Schema schema)
     {
         // get schema directory page
-        var schemaDirectoryPage = (await _pageBuffer.ReadPageAsync(SchemaDirectoryPageNumber))
+        var schemaDirectoryPage = (await _pageBufferManager.ReadPageAsync(SchemaDirectoryPageNumber))
             .AsSchemaDirectoryPage();
         // allocate a new schema page from page buffer
         // todo: (but how do we know most recently free page???
-        var schemaPage = _pageBuffer.AllocatePage(2) // todo: no longer hard code to 2
+        var schemaPage = _pageBufferManager
+            .AllocatePage(2) // todo: no longer hard code to 2
             .AsSchemaPage();
         // todo: validate name as valid
         // add info schema object to page
@@ -123,6 +109,6 @@ public class Database : IDisposable
 public record DatabaseInfo
 {
     public int Version { get; init; }
-    public int PageDirectoryPageNumber { get; init; }
+    public int PageCount { get; init; }
     public int SchemaDirectoryPageNumber { get; init; }
 }

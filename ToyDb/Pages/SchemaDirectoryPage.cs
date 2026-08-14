@@ -27,9 +27,10 @@ public class SchemaDirectoryPage(Memory<byte> data) : Page(data)
 
     public int NumTables
     {
-        get => BinaryPrimitives.ReadInt32LittleEndian(Data.Span[NumTablesOffset..]);
-        set => BinaryPrimitives.WriteInt32LittleEndian(Data.Span[NumTablesOffset..], value);
+        get => BinaryPrimitives.ReadInt32LittleEndian(Data.Span[..]);
+        set => BinaryPrimitives.WriteInt32LittleEndian(Data.Span[..], value);
     }
+    
 
     public int[] SchemaPageNumbers =>
         MemoryMarshal.Cast<byte, int>(data.Span[(NumTablesOffset + 4)..(NumTables * Constants.PageNumberSize)])

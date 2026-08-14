@@ -1,10 +1,10 @@
-﻿using Microsoft.Win32.SafeHandles;
+﻿namespace ToyDb;
 
-namespace ToyDb;
-
-public class PageBuffer(SafeFileHandle safeHandle)
+public class PageBufferManager(FileIoManager fileIoManager, PageBufferConfig? pageBufferConfig) : IDisposable
 {
-    private readonly Memory<byte> _shittyBigAssBuffer = new byte[Constants.PageSizeBytes * 2_000];
+    private readonly Memory<byte> _shittyBigAssBuffer =
+        new byte[Constants.PageSizeBytes * pageBufferConfig?.FrameCount ?? 2_000];
+
     private readonly Dictionary<int, bool> _pageBufferTable = new();
 
     public async Task<Page> ReadPageAsync(int pageNumber)
@@ -12,7 +12,7 @@ public class PageBuffer(SafeFileHandle safeHandle)
         var bufferSlice = _shittyBigAssBuffer.Slice(pageNumber * Constants.PageSizeBytes, Constants.PageSizeBytes);
         if (!_pageBufferTable.ContainsKey(pageNumber) || !_pageBufferTable[pageNumber])
         {
-            await RandomAccess.ReadAsync(safeHandle, bufferSlice, pageNumber * Constants.PageSizeBytes);
+            await fileIoManager.ReadAsync(pageNumber * Constants.PageSizeBytes, bufferSlice);
             _pageBufferTable[pageNumber] = true;
         }
 
@@ -22,7 +22,7 @@ public class PageBuffer(SafeFileHandle safeHandle)
     public Page AllocatePage(int pageNumber)
     {
         if (_pageBufferTable.ContainsKey(pageNumber)) throw new InvalidOperationException("Page already allocated");
-        
+
         var bufferSlice = _shittyBigAssBuffer.Slice(pageNumber * Constants.PageSizeBytes, Constants.PageSizeBytes);
         _pageBufferTable[pageNumber] = true;
 
@@ -35,8 +35,16 @@ public class PageBuffer(SafeFileHandle safeHandle)
         {
             ReadOnlyMemory<byte> pageMemory =
                 _shittyBigAssBuffer.Slice(pageNumber * Constants.PageSizeBytes, Constants.PageSizeBytes);
-            await RandomAccess.WriteAsync(safeHandle, pageMemory, pageNumber * Constants.PageSizeBytes);
+            await fileIoManager.WriteAsync(pageNumber * Constants.PageSizeBytes, pageMemory);
         }
-        RandomAccess.FlushToDisk(safeHandle);
+
+        await fileIoManager.FlushAsync();
+    }
+
+    public void Dispose()
+    {
+        fileIoManager.Dispose();
     }
 }
+
+public record PageBufferConfig(int FrameCount);
