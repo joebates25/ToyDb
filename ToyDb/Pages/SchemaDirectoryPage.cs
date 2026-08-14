@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 
 namespace ToyDb.Pages;
 
-public class SchemaDirectoryPage(Memory<byte> data) : Page(data)
+public class SchemaDirectoryPage(Memory<byte> data) : Page(data), IPageFactory<SchemaDirectoryPage>
 {
     /*
         Schema directory page layout (4096 bytes):
@@ -30,10 +30,9 @@ public class SchemaDirectoryPage(Memory<byte> data) : Page(data)
         get => BinaryPrimitives.ReadInt32LittleEndian(Data.Span[..]);
         set => BinaryPrimitives.WriteInt32LittleEndian(Data.Span[..], value);
     }
-    
 
     public int[] SchemaPageNumbers =>
-        MemoryMarshal.Cast<byte, int>(data.Span[(NumTablesOffset + 4)..(NumTables * Constants.PageNumberSize)])
+        MemoryMarshal.Cast<byte, int>(Data.Span[(NumTablesOffset + 4)..(NumTables * Constants.PageNumberSize)])
             .ToArray();
 
     public int[] NonDeletedSchemaPageNumbers => SchemaPageNumbers.Where(x => x != DeletedTableValue).ToArray();
@@ -49,5 +48,15 @@ public class SchemaDirectoryPage(Memory<byte> data) : Page(data)
     {
         BinaryPrimitives.WriteInt32LittleEndian(
             Data.Span[((NumTablesOffset + 4) + entrySlot * Constants.PageNumberSize)..], DeletedTableValue);
+    }
+
+    public static SchemaDirectoryPage CreatePage(Memory<byte> data)
+    {
+        return new SchemaDirectoryPage(data);
+    }
+
+    public static SchemaDirectoryPage InitializePage(Memory<byte> data)
+    {
+        return new SchemaDirectoryPage(data);
     }
 }

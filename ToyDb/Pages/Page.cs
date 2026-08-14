@@ -2,29 +2,16 @@
 
 namespace ToyDb;
 
-public class Page(Memory<byte> data)
+public abstract class Page(Memory<byte> data) 
 {
     public int PageSize => Constants.PageSizeBytes;
     protected int PageType = 0;
     internal Memory<byte> Data = data;
-
-    // problem: will need a new method here for every page
-    
-    public SchemaDirectoryPage AsSchemaDirectoryPage()
-    {
-        return new SchemaDirectoryPage(Data);
-    }
-    
-    public SchemaPage AsSchemaPage()
-    {
-        return new SchemaPage(Data);
-    }
 }
 
-public static class PageExtensions
+public interface IPageFactory<TPage> where TPage : Page
 {
-    public static DatabaseHeaderPage AsDatabaseHeaderPage(this Page page)
-    {
-        return new DatabaseHeaderPage(page.Data);
-    }
+    static abstract TPage CreatePage(Memory<byte> data);
+    
+    static abstract TPage InitializePage(Memory<byte> data);
 }

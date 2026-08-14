@@ -7,34 +7,37 @@ public class PageBufferManager(FileIoManager fileIoManager, PageBufferConfig? pa
 
     private readonly Dictionary<int, bool> _pageBufferTable = new();
 
-    public async Task<Page> ReadPageAsync(int pageNumber)
+    public async Task<TPage> ReadPageAsync<TPage>(int pageNumber) where TPage : Page, IPageFactory<TPage>
     {
         var bufferSlice = _shittyBigAssBuffer.Slice(pageNumber * Constants.PageSizeBytes, Constants.PageSizeBytes);
         if (!_pageBufferTable.ContainsKey(pageNumber) || !_pageBufferTable[pageNumber])
         {
+            // todo: Consider clearing buffer slot
             await fileIoManager.ReadAsync(pageNumber * Constants.PageSizeBytes, bufferSlice);
             _pageBufferTable[pageNumber] = true;
         }
 
-        return new Page(bufferSlice);
+        return TPage.CreatePage(bufferSlice);
     }
 
-    public Page AllocatePage(int pageNumber)
+    public TPage AllocatePage<TPage>(int pageNumber) where TPage : Page, IPageFactory<TPage>
     {
         if (_pageBufferTable.ContainsKey(pageNumber)) throw new InvalidOperationException("Page already allocated");
 
+        // todo: Consider clearing buffer slot
         var bufferSlice = _shittyBigAssBuffer.Slice(pageNumber * Constants.PageSizeBytes, Constants.PageSizeBytes);
         _pageBufferTable[pageNumber] = true;
 
-        return new Page(bufferSlice);
+        return TPage.InitializePage(bufferSlice);
     }
 
     public async Task FlushAsync()
     {
         foreach (var pageNumber in _pageBufferTable.Keys)
         {
-            ReadOnlyMemory<byte> pageMemory =
-                _shittyBigAssBuffer.Slice(pageNumber * Constants.PageSizeBytes, Constants.PageSizeBytes);
+            var pageMemory =
+                (ReadOnlyMemory<byte>) _shittyBigAssBuffer.Slice(pageNumber * Constants.PageSizeBytes,
+                    Constants.PageSizeBytes);
             await fileIoManager.WriteAsync(pageNumber * Constants.PageSizeBytes, pageMemory);
         }
 

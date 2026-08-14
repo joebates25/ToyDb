@@ -3,7 +3,7 @@ using System.Text;
 
 namespace ToyDb.Pages;
 
-public class SchemaPage(Memory<byte> data) : Page(data)
+public class SchemaPage(Memory<byte> data) : Page(data), IPageFactory<SchemaPage>
 {
     /* Some specs:
         Max Schema name length: 128
@@ -77,13 +77,23 @@ public class SchemaPage(Memory<byte> data) : Page(data)
     {
         if (FieldCount == 31) throw new ArgumentOutOfRangeException(nameof(FieldCount));
 
-        var fieldSlot = data.Span.Slice(FieldsOffset + FieldCount * FieldSizeBytes, FieldSizeBytes);
+        var fieldSlot = Data.Span.Slice(FieldsOffset + FieldCount * FieldSizeBytes, FieldSizeBytes);
         fieldSlot.Clear();
         Encoding.UTF8.GetBytes(name).CopyTo(fieldSlot);
         fieldSlot[NameLengthBytes] = (byte)type;
         fieldSlot[NameLengthBytes + 1] = length;
 
         FieldCount++;
+    }
+
+    public static SchemaPage CreatePage(Memory<byte> data)
+    {
+        return new SchemaPage(data);
+    }
+
+    public static SchemaPage InitializePage(Memory<byte> data)
+    {
+        return new SchemaPage(data);
     }
 }
 

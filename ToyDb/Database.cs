@@ -25,7 +25,7 @@ public class Database : IDisposable
         _pageBufferManager = new PageBufferManager(
             new FileIoManager(filePath),
             pageBufferConfig: new PageBufferConfig(FrameCount: 2_000));
-        var headerPage = _pageBufferManager.ReadPageAsync(0).Result.AsDatabaseHeaderPage();
+        var headerPage = _pageBufferManager.ReadPageAsync<DatabaseHeaderPage>(0).Result;
         var welcomeValid = headerPage.WelcomeMessage == Constants.WelcomeMessage;
         if (!welcomeValid) throw new Exception("Invalid database format.");
 
@@ -48,14 +48,11 @@ public class Database : IDisposable
             pageBufferConfig: new PageBufferConfig(FrameCount: 20)); // only need a small buffer to init db
 
         var newHeaderPage = pageBuffer
-            .AllocatePage(0)
-            .AsDatabaseHeaderPage();
+            .AllocatePage<DatabaseHeaderPage>(0);
         newHeaderPage.SetVersion(EngineVersion);
         newHeaderPage.SetPageCount(0); //todo: update once we get a real page directory
 
-        pageBuffer
-            .AllocatePage(SchemaDirectoryPageNumber)
-            .AsSchemaDirectoryPage();
+        pageBuffer.AllocatePage<SchemaDirectoryPage>(SchemaDirectoryPageNumber);
         newHeaderPage.SetSchemaDirectoryPageNumber(SchemaDirectoryPageNumber);
 
         await pageBuffer.FlushAsync();
@@ -71,16 +68,18 @@ public class Database : IDisposable
     public async Task AddSchemaAsync(Schema schema)
     {
         // get schema directory page
-        var schemaDirectoryPage = (await _pageBufferManager.ReadPageAsync(SchemaDirectoryPageNumber))
-            .AsSchemaDirectoryPage();
+        var schemaDirectoryPage =
+            await _pageBufferManager.ReadPageAsync<SchemaDirectoryPage>(SchemaDirectoryPageNumber);
+        
+        
         // allocate a new schema page from page buffer
         // todo: (but how do we know most recently free page???
-        var schemaPage = _pageBufferManager
-            .AllocatePage(2) // todo: no longer hard code to 2
-            .AsSchemaPage();
+        var schemaPage = _pageBufferManager.AllocatePage<SchemaPage>(2); // todo: no longer hard code to 2
+        
         // todo: validate name as valid
         // add info schema object to page
         schemaPage.Name = schema.Name;
+        
         foreach (var schemaField in schema.Fields)
         {
             // todo: map better

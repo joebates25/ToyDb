@@ -1,12 +1,12 @@
 ﻿using System.Buffers.Binary;
 using System.Text;
 
-namespace ToyDb;
+namespace ToyDb.Pages;
 
 /// <summary>
 /// Contains the basic information about the database for functioning
 /// </summary>
-public class DatabaseHeaderPage : Page
+public class DatabaseHeaderPage(Memory<byte> data) : Page(data), IPageFactory<DatabaseHeaderPage>
 {
     /*
         Database header page layout (4096 bytes):
@@ -27,12 +27,7 @@ public class DatabaseHeaderPage : Page
     private const int VersionOffset = 17;
     private const int PageCountOffset = 21;
     private const int SchemaDirectoryOffset = 25;
-
-    public DatabaseHeaderPage(Memory<byte> data) : base(data)
-    {
-        Encoding.UTF8.GetBytes(Constants.WelcomeMessage).CopyTo(data.Span);
-    }
-
+    
     public string WelcomeMessage => Encoding.UTF8.GetString(Data.Span[..WelcomeMessageLength]);
 
     public int Version => BitConverter.ToInt32(Data.Span[VersionOffset..]);
@@ -42,11 +37,22 @@ public class DatabaseHeaderPage : Page
 
     public int PageCount => BinaryPrimitives.ReadInt32LittleEndian(Data.Span[PageCountOffset..]);
 
-    public void SetPageCount(int PageCount) =>
-        BinaryPrimitives.WriteInt32LittleEndian(Data.Span[PageCountOffset..], PageCount);
+    public void SetPageCount(int pageCount) =>
+        BinaryPrimitives.WriteInt32LittleEndian(Data.Span[PageCountOffset..], pageCount);
 
     public int SchemaDirectoryPageNumber => BitConverter.ToInt32(Data.Span[SchemaDirectoryOffset..]);
 
     public void SetSchemaDirectoryPageNumber(int schemaDirectoryPageNumber) =>
         BinaryPrimitives.WriteInt32LittleEndian(Data.Span[SchemaDirectoryOffset..], schemaDirectoryPageNumber);
+
+    public static DatabaseHeaderPage CreatePage(Memory<byte> data)
+    {
+        return new DatabaseHeaderPage(data);
+    }
+
+    public static DatabaseHeaderPage InitializePage(Memory<byte> data)
+    {
+        Encoding.UTF8.GetBytes(Constants.WelcomeMessage).CopyTo(data.Span);
+        return new DatabaseHeaderPage(data);
+    }
 }
