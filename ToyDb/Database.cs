@@ -74,15 +74,59 @@ public class Database : IDisposable
 
     public async Task AddSchemaAsync(Schema schema)
     {
-        var headerPage = await _pageBufferManager.ReadPageAsync<DatabaseHeaderPage>(0);
+        SchemaManager
+    }
+
+    public async Task Insert(string tableName, KeyValuePair<string, object>[] data)
+    {
+        if (!SchemaDirectory.TryGetValue(tableName, out var schemaPageNumber))
+        {
+            throw new Exception($"Table {tableName} does not exist.");
+        }
+
+        var schemaPage = await _pageBufferManager.ReadPageAsync<SchemaPage>(schemaPageNumber);
+
+        var schema = GetShemaFromPage(schemaPage);
+        if (!ValidateDataAgainstSchema(schema, data))
+        {
+            throw new Exception("Invalid data provided");
+        }
+        
+
+    }
+    
+    private bool ValidateDataAgainstSchema(Schema schema, KeyValuePair<string, object>[] data)
+    {
+        throw new NotImplementedException();
+    }
+
+    private Schema GetShemaFromPage(SchemaPage schemaPage)
+    {
+        
+        
+    }
+}
+
+public class SchemaManager(PageBufferManager pageBufferManager)
+{
+    private readonly Dictionary<string, int> SchemaDirectory = new();
+
+    public Schema GetSchema(string schemaName)
+    {
+        throw new NotImplementedException();
+    }
+
+    public async Task AddSchemaAsync(Schema schema)
+    {
+        var headerPage = await pageBufferManager.ReadPageAsync<DatabaseHeaderPage>(0);
 
         // get schema directory page
         var schemaDirectoryPage =
-            await _pageBufferManager.ReadPageAsync<SchemaDirectoryPage>(SchemaDirectoryPageNumber);
+            await pageBufferManager.ReadPageAsync<SchemaDirectoryPage>(headerPage.SchemaDirectoryPageNumber);
 
         var schemaPageNumber = ++headerPage.PageCount;
         // allocate a new schema page from page buffer
-        var schemaPage = _pageBufferManager.AllocatePage<SchemaPage>(schemaPageNumber);
+        var schemaPage = pageBufferManager.AllocatePage<SchemaPage>(schemaPageNumber);
 
         // todo: validate name as valid
         // add info schema object to page
@@ -112,27 +156,10 @@ public class Database : IDisposable
         schemaDirectoryPage.InsertSchemaDirectoryEntry(schemaPageNumber);
 
         var newDataPageNumber = ++headerPage.PageCount;
-        _pageBufferManager.AllocatePage<DataPage>(newDataPageNumber);
+        pageBufferManager.AllocatePage<DataPage>(newDataPageNumber);
         schemaPage.FirstDataPageNumber = newDataPageNumber;
         
         SchemaDirectory.Add(schema.Name, schemaPageNumber);
-    }
-
-    public async Task Insert(string tableName, KeyValuePair<string, object>[] data)
-    {
-        if (!SchemaDirectory.ContainsKey(tableName))
-        {
-            throw new Exception($"Table {tableName} does not exist.");
-        }
-        
-        var schemaPageNumber = SchemaDirectory[tableName];
-        var schemaPage = await _pageBufferManager.ReadPageAsync<SchemaPage>(schemaPageNumber);
-        
-        // todo: validate that fields are even correct
-        
-        schemaPage.FirstDataPageNumber;
-        
-        
     }
 }
 
