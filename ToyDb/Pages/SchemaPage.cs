@@ -18,8 +18,11 @@ public class SchemaPage(Memory<byte> data) : Page(data), IPageFactory<SchemaPage
         | FirstDataPageNumber       |
         | (4 bytes, LE)             |
         +---------------------------+ byte 132
-        | FieldCount (4 bytes, LE)  |
+        | LastDataPageNumber        |
+        | (4 bytes, LE)             |
         +---------------------------+ byte 136
+        | FieldCount (4 bytes, LE)  |
+        +---------------------------+ byte 140
         | Fields (130 bytes each)   |
         |   +---------------------+ |
         |   | Name (128 bytes)    | |
@@ -32,7 +35,8 @@ public class SchemaPage(Memory<byte> data) : Page(data), IPageFactory<SchemaPage
     */
     private const int NameLengthBytes = 128;
     private const int FirstDataPageNumberOffset = NameLengthBytes;
-    private const int FieldCountOffset = FirstDataPageNumberOffset + sizeof(int);
+    private const int LastDataPageNumberOffset = FirstDataPageNumberOffset + sizeof(int);
+    private const int FieldCountOffset = LastDataPageNumberOffset + sizeof(int);
     private const int FieldsOffset = FieldCountOffset + sizeof(int);
 
     // default length 128 no matter what -- padded
@@ -50,6 +54,12 @@ public class SchemaPage(Memory<byte> data) : Page(data), IPageFactory<SchemaPage
     {
         get => BinaryPrimitives.ReadInt32LittleEndian(Data.Span[FirstDataPageNumberOffset..]);
         set => BinaryPrimitives.WriteInt32LittleEndian(Data.Span[FirstDataPageNumberOffset..], value);
+    }
+
+    public int LastDataPageNumber
+    {
+        get => BinaryPrimitives.ReadInt32LittleEndian(Data.Span[LastDataPageNumberOffset..]);
+        set => BinaryPrimitives.WriteInt32LittleEndian(Data.Span[LastDataPageNumberOffset..], value);
     }
 
     public int FieldCount

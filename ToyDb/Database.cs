@@ -12,7 +12,7 @@ public class Database : IDisposable
 
     private readonly PageBufferManager _pageBufferManager;
 
-    private readonly Dictionary<string, int> SchemaDirectory = new();
+    private readonly SchemaManager _schemaManager;
 
     /*
      * Init todo list:
@@ -30,6 +30,8 @@ public class Database : IDisposable
         var headerPage = _pageBufferManager.ReadPageAsync<DatabaseHeaderPage>(0).Result;
         var welcomeValid = headerPage.WelcomeMessage == Constants.WelcomeMessage;
         if (!welcomeValid) throw new Exception("Invalid database format.");
+
+        _schemaManager = new SchemaManager(_pageBufferManager);
 
         Info = new DatabaseInfo
         {
@@ -72,94 +74,63 @@ public class Database : IDisposable
         _pageBufferManager.Dispose();
     }
 
-    public async Task AddSchemaAsync(Schema schema)
+    public Task AddSchemaAsync(Schema schema)
     {
-        SchemaManager
+        return _schemaManager.AddSchemaAsync(schema);
     }
 
-    public async Task Insert(string tableName, KeyValuePair<string, object>[] data)
+    public async Task<int> InsertAsync(string tableName, string[] columns, object[][] valueSets)
     {
-        if (!SchemaDirectory.TryGetValue(tableName, out var schemaPageNumber))
+        var insertedRowCount = 0;
+        if (_schemaManager.HasSchema(tableName))
         {
             throw new Exception($"Table {tableName} does not exist.");
         }
 
-        var schemaPage = await _pageBufferManager.ReadPageAsync<SchemaPage>(schemaPageNumber);
-
-        var schema = GetShemaFromPage(schemaPage);
-        if (!ValidateDataAgainstSchema(schema, data))
+        var schemaPage = await _schemaManager.GetSchemaAsync(tableName);
+        if (!_schemaManager.ValidateColumnsAgainstSchema(schemaPage, columns))
         {
-            throw new Exception("Invalid data provided");
+            throw new Exception("Invalid columns provided");
         }
-        
 
+        var insertPage = await _pageBufferManager.ReadPageAsync<DataPage>(schemaPage.LastDataPageNumber);
+        foreach (var valueSet in valueSets)
+        {
+            if (!TryValueSetValidation(schemaPage, valueSet, out string errorMessage))
+            {
+                throw new Exception(errorMessage);
+            }
+
+            if (!HasFreeSpaceForInsert(schemaPage, valueSet))
+            {
+                var headerPage = (await _pageBufferManager.ReadPageAsync<DatabaseHeaderPage>(0));
+                var insertedPageNumber = ++headerPage.PageCount;
+                var newDataPage = _pageBufferManager.AllocatePage<DataPage>(insertedPageNumber);
+                insertPage.OverFlowPageNumber = insertedPageNumber;
+                insertPage                    = newDataPage;
+            }
+
+            var rowData = ConvertDataToBytes(schemaPage, columns, valueSet);
+            insertPage.InsertData(rowData);
+            insertedRowCount++;
+        }
+
+        return insertedRowCount;
     }
-    
-    private bool ValidateDataAgainstSchema(Schema schema, KeyValuePair<string, object>[] data)
+
+    private ReadOnlyMemory<byte> ConvertDataToBytes(SchemaPage schemaPage, string[] columns, object[] valueSet)
     {
         throw new NotImplementedException();
     }
 
-    private Schema GetShemaFromPage(SchemaPage schemaPage)
-    {
-        
-        
-    }
-}
-
-public class SchemaManager(PageBufferManager pageBufferManager)
-{
-    private readonly Dictionary<string, int> SchemaDirectory = new();
-
-    public Schema GetSchema(string schemaName)
+    private bool HasFreeSpaceForInsert(SchemaPage schemaPage, object[] valueSet)
     {
         throw new NotImplementedException();
     }
 
-    public async Task AddSchemaAsync(Schema schema)
+    private bool TryValueSetValidation(SchemaPage schemaPage, object[] valueSet, out string errorMessage)
     {
-        var headerPage = await pageBufferManager.ReadPageAsync<DatabaseHeaderPage>(0);
-
-        // get schema directory page
-        var schemaDirectoryPage =
-            await pageBufferManager.ReadPageAsync<SchemaDirectoryPage>(headerPage.SchemaDirectoryPageNumber);
-
-        var schemaPageNumber = ++headerPage.PageCount;
-        // allocate a new schema page from page buffer
-        var schemaPage = pageBufferManager.AllocatePage<SchemaPage>(schemaPageNumber);
-
-        // todo: validate name as valid
-        // add info schema object to page
-        schemaPage.Name = schema.Name;
-
-        foreach (var schemaField in schema.Fields)
-        {
-            // todo: map better
-            var type = schemaField.Type switch
-            {
-                SchemaFieldType.Boolean => SchemaPageFieldType.Boolean,
-                SchemaFieldType.Integer => SchemaPageFieldType.Integer,
-                SchemaFieldType.Long => SchemaPageFieldType.Long,
-                _ => SchemaPageFieldType.String
-            };
-            var length = schemaField.Type switch
-            {
-                SchemaFieldType.Boolean => 1,
-                SchemaFieldType.Integer => 4,
-                SchemaFieldType.Long => 8,
-                _ => schemaField.Length
-            };
-            schemaPage.AddField(schemaField.Name, type, (byte) length);
-        }
-
-        // update schema directory page with new schema location
-        schemaDirectoryPage.InsertSchemaDirectoryEntry(schemaPageNumber);
-
-        var newDataPageNumber = ++headerPage.PageCount;
-        pageBufferManager.AllocatePage<DataPage>(newDataPageNumber);
-        schemaPage.FirstDataPageNumber = newDataPageNumber;
-        
-        SchemaDirectory.Add(schema.Name, schemaPageNumber);
+        throw new NotImplementedException();
     }
 }
 
