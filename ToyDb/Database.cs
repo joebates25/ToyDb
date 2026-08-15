@@ -2,6 +2,9 @@
 
 namespace ToyDb;
 
+using System.Buffers.Binary;
+using System.Text;
+
 public class Database : IDisposable
 {
     private const int EngineVersion = 2;
@@ -96,21 +99,22 @@ public class Database : IDisposable
         var insertPage = await _pageBufferManager.ReadPageAsync<DataPage>(schemaPage.LastDataPageNumber);
         foreach (var valueSet in valueSets)
         {
-            if (!TryValueSetValidation(schemaPage, valueSet, out string errorMessage))
+            if (!TryValueSetValidation(schemaPage, columns, valueSet, out var errorMessage))
             {
                 throw new Exception(errorMessage);
             }
 
-            if (!HasFreeSpaceForInsert(schemaPage, valueSet))
+            var rowData = ConvertDataToBytes(schemaPage, columns, valueSet);
+            if (!HasFreeSpaceForInsert(insertPage, rowData.Length))
             {
-                var headerPage = (await _pageBufferManager.ReadPageAsync<DatabaseHeaderPage>(0));
+                var headerPage = await _pageBufferManager.ReadPageAsync<DatabaseHeaderPage>(0);
                 var insertedPageNumber = ++headerPage.PageCount;
                 var newDataPage = _pageBufferManager.AllocatePage<DataPage>(insertedPageNumber);
                 insertPage.OverFlowPageNumber = insertedPageNumber;
                 insertPage                    = newDataPage;
+                schemaPage.LastDataPageNumber = insertedPageNumber;
             }
 
-            var rowData = ConvertDataToBytes(schemaPage, columns, valueSet);
             insertPage.InsertData(rowData);
             insertedRowCount++;
         }
@@ -120,17 +124,91 @@ public class Database : IDisposable
 
     private ReadOnlyMemory<byte> ConvertDataToBytes(SchemaPage schemaPage, string[] columns, object[] valueSet)
     {
-        throw new NotImplementedException();
+        var fields = schemaPage.Fields;
+        var fieldsByName = fields.ToDictionary(field => field.Name, StringComparer.Ordinal);
+        var rowData = new byte[fields.Sum(field => field.Length)];
+
+        for (var i = 0; i < columns.Length; i++)
+        {
+            var field = fieldsByName[columns[i]];
+            var destination = rowData.AsSpan(field.Offset, field.Length);
+
+            switch (field.Type)
+            {
+                case SchemaPageFieldType.Integer:
+                    BinaryPrimitives.WriteInt32LittleEndian(destination, (int) valueSet[i]);
+                    break;
+                case SchemaPageFieldType.Boolean:
+                    destination[0] = (bool) valueSet[i] ? (byte) 1 : (byte) 0;
+                    break;
+                case SchemaPageFieldType.Long:
+                    BinaryPrimitives.WriteInt64LittleEndian(destination, (long) valueSet[i]);
+                    break;
+                case SchemaPageFieldType.String:
+                    Encoding.UTF8.GetBytes((string) valueSet[i], destination);
+                    break;
+                default:
+                    throw new InvalidDataException(
+                        $"Column '{field.Name}' has an unknown field type value: {(byte) field.Type}.");
+            }
+        }
+
+        return rowData;
     }
 
-    private bool HasFreeSpaceForInsert(SchemaPage schemaPage, object[] valueSet)
+    private static bool HasFreeSpaceForInsert(DataPage dataPage, int rowLength)
     {
-        throw new NotImplementedException();
+        return rowLength >= 0 && rowLength + DataPage.SlotSize <= dataPage.FreeSpaceSize;
     }
 
-    private bool TryValueSetValidation(SchemaPage schemaPage, object[] valueSet, out string errorMessage)
+    private static bool TryValueSetValidation(
+        SchemaPage schemaPage,
+        string[] columns,
+        object[] valueSet,
+        out string errorMessage)
     {
-        throw new NotImplementedException();
+        if (valueSet.Length != columns.Length)
+        {
+            errorMessage = $"Expected {columns.Length} values, but received {valueSet.Length}.";
+            return false;
+        }
+
+        var fieldsByName = schemaPage.Fields.ToDictionary(field => field.Name, StringComparer.Ordinal);
+
+        for (var i = 0; i < columns.Length; i++)
+        {
+            if (!fieldsByName.TryGetValue(columns[i], out var field))
+            {
+                errorMessage = $"Column '{columns[i]}' does not exist in schema '{schemaPage.Name}'.";
+                return false;
+            }
+
+            var value = valueSet[i];
+            if (value is null)
+            {
+                errorMessage = $"Column '{field.Name}' does not accept null values.";
+                return false;
+            }
+
+            var valueIsValid = field.Type switch
+            {
+                SchemaPageFieldType.Integer => field.Length == sizeof(int) && value is int,
+                SchemaPageFieldType.Boolean => field.Length == sizeof(byte) && value is bool,
+                SchemaPageFieldType.Long    => field.Length == sizeof(long) && value is long,
+                SchemaPageFieldType.String  => value is string stringValue &&
+                                               Encoding.UTF8.GetByteCount(stringValue) <= field.Length,
+                _                           => false
+            };
+
+            if (!valueIsValid)
+            {
+                errorMessage = $"Value for column '{field.Name}' does not match its {field.Type} definition.";
+                return false;
+            }
+        }
+
+        errorMessage = string.Empty;
+        return true;
     }
 }
 
