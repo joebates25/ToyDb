@@ -1,20 +1,22 @@
-﻿namespace ToyDb;
+﻿using System.Collections;
+
+namespace ToyDb;
 
 public class PageBufferManager(FileIoManager fileIoManager, PageBufferConfig? pageBufferConfig) : IDisposable
 {
     private readonly Memory<byte> _shittyBigAssBuffer =
         new byte[Constants.PageSizeBytes * pageBufferConfig?.FrameCount ?? 2_000];
 
-    private readonly Dictionary<int, bool> _pageBufferTable = new();
+    private readonly HashSet<int> _pageBufferTable = new();
 
     public async Task<TPage> ReadPageAsync<TPage>(int pageNumber) where TPage : Page, IPageFactory<TPage>
     {
         var bufferSlice = _shittyBigAssBuffer.Slice(pageNumber * Constants.PageSizeBytes, Constants.PageSizeBytes);
-        if (!_pageBufferTable.ContainsKey(pageNumber) || !_pageBufferTable[pageNumber])
+        if (!_pageBufferTable.Contains(pageNumber))
         {
-            // todo: Consider clearing buffer slot
+            bufferSlice.Span.Fill(0);
             await fileIoManager.ReadAsync(pageNumber * Constants.PageSizeBytes, bufferSlice);
-            _pageBufferTable[pageNumber] = true;
+            _pageBufferTable.Add(pageNumber);
         }
 
         return TPage.CreatePage(bufferSlice);
@@ -22,18 +24,18 @@ public class PageBufferManager(FileIoManager fileIoManager, PageBufferConfig? pa
 
     public TPage AllocatePage<TPage>(int pageNumber) where TPage : Page, IPageFactory<TPage>
     {
-        if (_pageBufferTable.ContainsKey(pageNumber)) throw new InvalidOperationException($"Page {pageNumber} already allocated");
+        if (_pageBufferTable.Contains(pageNumber)) throw new InvalidOperationException($"Page {pageNumber} already allocated");
 
-        // todo: Consider clearing buffer slot
         var bufferSlice = _shittyBigAssBuffer.Slice(pageNumber * Constants.PageSizeBytes, Constants.PageSizeBytes);
-        _pageBufferTable[pageNumber] = true;
+        bufferSlice.Span.Fill(0);
+        _pageBufferTable.Add(pageNumber);
 
         return TPage.InitializePage(bufferSlice);
     }
 
     public async Task FlushAsync()
     {
-        foreach (var pageNumber in _pageBufferTable.Keys)
+        foreach (var pageNumber in _pageBufferTable)
         {
             var pageMemory =
                 (ReadOnlyMemory<byte>) _shittyBigAssBuffer.Slice(pageNumber * Constants.PageSizeBytes,

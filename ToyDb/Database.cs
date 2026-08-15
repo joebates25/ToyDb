@@ -12,6 +12,8 @@ public class Database : IDisposable
 
     private readonly PageBufferManager _pageBufferManager;
 
+    private readonly Dictionary<string, int> SchemaDirectory = new();
+
     /*
      * Init todo list:
      * Start up page buffer
@@ -49,11 +51,11 @@ public class Database : IDisposable
 
         var newHeaderPage = pageBuffer
             .AllocatePage<DatabaseHeaderPage>(0);
-        newHeaderPage.Version   = EngineVersion;
+        newHeaderPage.Version = EngineVersion;
 
         pageBuffer.AllocatePage<SchemaDirectoryPage>(SchemaDirectoryPageNumber);
         newHeaderPage.SchemaDirectoryPageNumber = SchemaDirectoryPageNumber;
-        newHeaderPage.PageCount = 2; 
+        newHeaderPage.PageCount                 = 2;
 
         await pageBuffer.FlushAsync();
     }
@@ -62,10 +64,11 @@ public class Database : IDisposable
         !File.Exists(filePath)
             ? throw new Exception("File not found.")
             : new Database(filePath);
-    
+
     public Task CloseAsync() => _pageBufferManager.FlushAsync();
 
-    public void Dispose() {
+    public void Dispose()
+    {
         _pageBufferManager.Dispose();
     }
 
@@ -77,9 +80,9 @@ public class Database : IDisposable
         var schemaDirectoryPage =
             await _pageBufferManager.ReadPageAsync<SchemaDirectoryPage>(SchemaDirectoryPageNumber);
 
-        var newPageCount = ++headerPage.PageCount;
+        var schemaPageNumber = ++headerPage.PageCount;
         // allocate a new schema page from page buffer
-        var schemaPage = _pageBufferManager.AllocatePage<SchemaPage>(newPageCount);
+        var schemaPage = _pageBufferManager.AllocatePage<SchemaPage>(schemaPageNumber);
 
         // todo: validate name as valid
         // add info schema object to page
@@ -106,19 +109,30 @@ public class Database : IDisposable
         }
 
         // update schema directory page with new schema location
-        schemaDirectoryPage.InsertSchemaDirectoryEntry(newPageCount);
+        schemaDirectoryPage.InsertSchemaDirectoryEntry(schemaPageNumber);
 
         var newDataPageNumber = ++headerPage.PageCount;
         _pageBufferManager.AllocatePage<DataPage>(newDataPageNumber);
         schemaPage.FirstDataPageNumber = newDataPageNumber;
+        
+        SchemaDirectory.Add(schema.Name, schemaPageNumber);
     }
 
-    public async Task Query()
+    public async Task Insert(string tableName, KeyValuePair<string, object>[] data)
     {
-        var header = await _pageBufferManager.ReadPageAsync<DatabaseHeaderPage>(0);
-        var schemaDirectoryPage = await _pageBufferManager.ReadPageAsync<SchemaDirectoryPage>(header.SchemaDirectoryPageNumber);
-        var schema = await _pageBufferManager.ReadPageAsync<SchemaPage>(schemaDirectoryPage.NonDeletedSchemaPageNumbers[0]);
-        Console.WriteLine(header.SchemaDirectoryPageNumber);
+        if (!SchemaDirectory.ContainsKey(tableName))
+        {
+            throw new Exception($"Table {tableName} does not exist.");
+        }
+        
+        var schemaPageNumber = SchemaDirectory[tableName];
+        var schemaPage = await _pageBufferManager.ReadPageAsync<SchemaPage>(schemaPageNumber);
+        
+        // todo: validate that fields are even correct
+        
+        schemaPage.FirstDataPageNumber;
+        
+        
     }
 }
 

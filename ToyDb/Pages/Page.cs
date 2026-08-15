@@ -9,7 +9,7 @@ public abstract class Page(Memory<byte> data)
     internal Memory<byte> Data = data;
 }
 
-public interface IPageFactory<TPage> where TPage : Page
+public interface IPageFactory<out TPage> where TPage : Page
 {
     static abstract TPage CreatePage(Memory<byte> data);
     
