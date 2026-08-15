@@ -18,7 +18,7 @@ Planned for Iteration First:
 Future plans:
 - Making database actually relational 
 - hash table indexes
-- Basic benchmarking so that I can see just how crappy this is with the most basic, stupid implementations and improve from there
+- Basic benchmarking of speed and space efficiency so that I can see just how crappy this is with the most basic, stupid implementations and improve from there
 - Actual eviction policies so that this writes to disk more than just once
 - Sorting, 
 - Stuff like limit, max/min, count
