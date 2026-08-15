@@ -13,6 +13,7 @@ Planned for Iteration First:
 - No handling of free space gaps
 - Uses a page buffer with very basic eviction policy: None. Everything get's written at the end. Run out of space? Oh Well. 
 - Strict schema limitations: If you can't fit your while schema def on 1 page, why are you even here?
+- Vacuum to clean up free space
 
 Future plans:
 - Making database actually relational 
