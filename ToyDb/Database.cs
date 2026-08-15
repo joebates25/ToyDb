@@ -82,7 +82,7 @@ public class Database : IDisposable
     public async Task<int> InsertAsync(string tableName, string[] columns, object[][] valueSets)
     {
         var insertedRowCount = 0;
-        if (_schemaManager.HasSchema(tableName))
+        if (!_schemaManager.HasSchema(tableName))
         {
             throw new Exception($"Table {tableName} does not exist.");
         }
