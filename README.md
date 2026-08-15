@@ -26,6 +26,7 @@ Future plans:
 Future future plans:
 - B+ tree indexes
 - Concurrency and transaction management
+- partial ACID compliance
 - Write ahead logging 
 - Network protocols
 - Actual sql parsing...maybe
