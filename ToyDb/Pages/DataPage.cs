@@ -52,11 +52,42 @@ public class DataPage(Memory<byte> data) : Page(data), IPageFactory<DataPage>
         set => BinaryPrimitives.WriteInt32LittleEndian(Data.Span[OverFlowPageNumberOffset..], value);
     }
 
+    public IEnumerable<Slot> EnumerateSlots()
+    {
+        var slotCount = SlotCount;
+        var maximumSlotCount = (Data.Length - HeaderSize) / SlotSize;
+        if ((uint) slotCount > (uint) maximumSlotCount)
+        {
+            throw new InvalidDataException(
+                $"Page contains an invalid slot count of {slotCount}.");
+        }
+
+        for (var index = 0; index < slotCount; index++)
+        {
+            yield return this[index];
+        }
+    }
+
     public int FreeSpaceSize => FreeSpaceEnd - HeaderSize - (SlotSize * SlotCount);
 
     public Slot this[int index]
     {
-        get => new Slot(true, 0, 1);
+        get
+        {
+            if (index < 0 || index >= SlotCount)
+            {
+                throw new ArgumentOutOfRangeException(nameof(index));
+            }
+
+            var slotOffset = HeaderSize + SlotSize * index;
+            var slotData = Data.Span.Slice(slotOffset, SlotSize);
+
+            return new Slot(
+                InUse: slotData[0] != 0,
+                OffsetStart: BinaryPrimitives.ReadUInt16LittleEndian(slotData[sizeof(bool)..]),
+                Length: BinaryPrimitives.ReadUInt16LittleEndian(
+                    slotData[(sizeof(bool) + sizeof(ushort))..]));
+        }
     }
 
     public Slot InsertData(ReadOnlyMemory<byte> data)

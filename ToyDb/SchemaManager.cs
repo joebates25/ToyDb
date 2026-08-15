@@ -152,22 +152,14 @@ public class SchemaManager(PageBufferManager pageBufferManager)
 
     // Validate that columns provided match what's available in schema
     // Data will later be validated row by row
+    // todo: split for inserts vs selects 
     public bool ValidateColumnsAgainstSchema(SchemaPage schema, string[] columns)
     {
-        var expectedColumns = GetSchemaFromPage(schema).Fields
+        var schemaColumns = schema.Fields
             .Select(field => field.Name)
             .ToHashSet(NameComparer);
 
-        if (columns.Length != expectedColumns.Count)
-        {
-            return false;
-        }
-
-        var suppliedColumns = new HashSet<string>(NameComparer);
-        return columns.All(column =>
-            !string.IsNullOrWhiteSpace(column) &&
-            suppliedColumns.Add(column) &&
-            expectedColumns.Contains(column));
+        return columns.All(schemaColumns.Contains);
     }
 
     private static bool ValueMatchesField(Field field, object value)

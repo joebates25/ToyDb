@@ -122,6 +122,54 @@ public class Database : IDisposable
         return insertedRowCount;
     }
 
+    public async IAsyncEnumerable<object[]> SelectAsync(string tableName, string[] columns)
+    {
+        if (!_schemaManager.HasSchema(tableName))
+        {
+            throw new Exception($"Table {tableName} does not exist.");
+        }
+
+        var schemaPage = await _schemaManager.GetSchemaAsync(tableName);
+        if (!_schemaManager.ValidateColumnsAgainstSchema(schemaPage, columns))
+        {
+            throw new Exception("Invalid columns provided");
+        }
+
+        var dataPageNumber = schemaPage.FirstDataPageNumber;
+        do
+        {
+            var dataPage = await _pageBufferManager.ReadPageAsync<DataPage>(dataPageNumber);
+            dataPageNumber = dataPage.OverFlowPageNumber;
+
+            foreach (var slot in dataPage.EnumerateSlots())
+            {
+                if (!slot.InUse) continue;
+
+                var dataRow = dataPage.Data.Slice(slot.OffsetStart, slot.Length);
+
+                yield return columns.Select(column => GetData(schemaPage, dataRow, column)).ToArray();
+            }
+        } while (dataPageNumber != -1);
+    }
+
+    private object GetData(SchemaPage schemaPage, Memory<byte> dataRow, string column)
+    {
+        // todo: GetData evaluates schemaPage.Fields and performs a linear name search for every field of every row.
+        // Resolve the requested SchemaPageField objects once before scanning.
+        var schemaColumn = schemaPage.Fields.First(x => x.Name == column);
+
+        var data = dataRow.Slice(schemaColumn.Offset, schemaColumn.Length).Span;
+
+        return schemaColumn.Type switch
+        {
+            SchemaPageFieldType.Integer => BinaryPrimitives.ReadInt32LittleEndian(data),
+            SchemaPageFieldType.Boolean => BitConverter.ToBoolean(data),
+            SchemaPageFieldType.Long => BinaryPrimitives.ReadInt64LittleEndian(data),
+            SchemaPageFieldType.String => Encoding.UTF8.GetString(data).TrimEnd('\0'),
+            _ => throw new Exception("unknown type")
+        };
+    }
+
     private ReadOnlyMemory<byte> ConvertDataToBytes(SchemaPage schemaPage, string[] columns, object[] valueSet)
     {
         var fields = schemaPage.Fields;
@@ -194,10 +242,10 @@ public class Database : IDisposable
             {
                 SchemaPageFieldType.Integer => field.Length == sizeof(int) && value is int,
                 SchemaPageFieldType.Boolean => field.Length == sizeof(byte) && value is bool,
-                SchemaPageFieldType.Long    => field.Length == sizeof(long) && value is long,
-                SchemaPageFieldType.String  => value is string stringValue &&
-                                               Encoding.UTF8.GetByteCount(stringValue) <= field.Length,
-                _                           => false
+                SchemaPageFieldType.Long => field.Length == sizeof(long) && value is long,
+                SchemaPageFieldType.String => value is string stringValue &&
+                                              Encoding.UTF8.GetByteCount(stringValue) <= field.Length,
+                _ => false
             };
 
             if (!valueIsValid)
