@@ -138,8 +138,8 @@ public class SchemaManager(PageBufferManager pageBufferManager)
             {
                 SchemaPageFieldType.Boolean => SchemaFieldType.Boolean,
                 SchemaPageFieldType.Integer => SchemaFieldType.Integer,
-                SchemaPageFieldType.Long    => SchemaFieldType.Long,
-                SchemaPageFieldType.String  => SchemaFieldType.String,
+                SchemaPageFieldType.Long => SchemaFieldType.Long,
+                SchemaPageFieldType.String => SchemaFieldType.String,
                 _ => throw new InvalidDataException(
                     $"Schema '{schemaPage.Name}' contains an unknown field type value: {(byte) pageField.Type}.")
             };
@@ -166,12 +166,12 @@ public class SchemaManager(PageBufferManager pageBufferManager)
     {
         return field.Type switch
         {
-            SchemaFieldType.String  => value is string stringValue &&
-                                       Encoding.UTF8.GetByteCount(stringValue) <= field.Length,
+            SchemaFieldType.String => value is string stringValue &&
+                                      Encoding.UTF8.GetByteCount(stringValue) <= field.Length,
             SchemaFieldType.Integer => value is int,
-            SchemaFieldType.Long    => value is long,
+            SchemaFieldType.Long => value is long,
             SchemaFieldType.Boolean => value is bool,
-            _                       => false
+            _ => false
         };
     }
 
@@ -192,10 +192,17 @@ public class SchemaManager(PageBufferManager pageBufferManager)
 
             if (!schemas.TryAdd(schemaPage.Name, schemaPageNumber))
             {
-                throw new InvalidDataException($"The schema directory contains duplicate schema name '{schemaPage.Name}'.");
+                throw new InvalidDataException(
+                    $"The schema directory contains duplicate schema name '{schemaPage.Name}'.");
             }
         }
 
         return schemas;
+    }
+
+    public bool ValidateFilterAgainstSchema(SchemaPage schemaPage, QueryFilter[]? filter)
+    {
+        // Confirm that each column in the filter exists, and each data type of the value in the filter matches that in the schema 
+        throw new NotImplementedException();
     }
 }

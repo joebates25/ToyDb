@@ -238,7 +238,11 @@ static async Task PrintRowsAsync(
     Console.WriteLine($"\n{tableName} sample:");
 
     var displayedRows = 0;
-    await foreach (var row in database.SelectAsync(tableName, columns))
+    await foreach (var row in database.SelectAsync(tableName, columns,
+                   [
+                       new QueryFilter("Column", QueryFilterOperator.EqualTo, 3),
+                       new QueryFilter("AnotherColumn", QueryFilterOperator.LessThan, "Value")
+                   ]))
     {
         Console.WriteLine(format(row));
         if (++displayedRows == maximumRows)

@@ -122,7 +122,10 @@ public class Database : IDisposable
         return insertedRowCount;
     }
 
-    public async IAsyncEnumerable<object[]> SelectAsync(string tableName, string[] columns)
+    public async IAsyncEnumerable<object[]> SelectAsync(
+        string tableName,
+        string[] columns,
+        QueryFilter[]? filter = null)
     {
         if (!_schemaManager.HasSchema(tableName))
         {
@@ -133,6 +136,11 @@ public class Database : IDisposable
         if (!_schemaManager.ValidateColumnsAgainstSchema(schemaPage, columns))
         {
             throw new Exception("Invalid columns provided");
+        }
+
+        if (filter is not null && !_schemaManager.ValidateFilterAgainstSchema(schemaPage, filter))
+        {
+            throw new Exception("Invalid filter provided");
         }
 
         var dataPageNumber = schemaPage.FirstDataPageNumber;
@@ -147,9 +155,38 @@ public class Database : IDisposable
 
                 var dataRow = dataPage.Data.Slice(slot.OffsetStart, slot.Length);
 
-                yield return columns.Select(column => GetData(schemaPage, dataRow, column)).ToArray();
+                if (DataRowPassesFilter(schemaPage, dataRow, filter))
+                {
+                    yield return columns.Select(column => GetData(schemaPage, dataRow, column)).ToArray();
+                }
             }
         } while (dataPageNumber != -1);
+    }
+
+    private bool DataRowPassesFilter(SchemaPage schemaPage, Memory<byte> dataRow, QueryFilter[]? filter)
+    {
+        if (filter is null) return true;
+
+        return filter.All(filterPredicate =>
+        {
+            var columnData = GetData(schemaPage, dataRow, filterPredicate.Column);
+            return CompareValues(columnData,
+                schemaPage.Fields.First(x => x.Name == filterPredicate.Column).Type,
+                filterPredicate.Operator,
+                filterPredicate.Value);
+        });
+    }
+
+    // Contract: Assume valid data at this point
+    // Compare (columnData) of (type) with against (filterPredicateValue) using (operator)
+    // return true or false depending on match 
+    private bool CompareValues(
+        object columnData,
+        SchemaPageFieldType type,
+        QueryFilterOperator filterPredicateOperator,
+        object filterPredicateValue)
+    {
+        throw new NotImplementedException();
     }
 
     private object GetData(SchemaPage schemaPage, Memory<byte> dataRow, string column)
@@ -258,6 +295,18 @@ public class Database : IDisposable
         errorMessage = string.Empty;
         return true;
     }
+}
+
+public record QueryFilter(string Column, QueryFilterOperator Operator, object Value);
+
+public enum QueryFilterOperator
+{
+    LessThan,
+    GreaterThan,
+    LessThanOrEqualTo,
+    GreaterThanOrEqualTo,
+    EqualTo,
+    NotEqualTo
 }
 
 public record DatabaseInfo
