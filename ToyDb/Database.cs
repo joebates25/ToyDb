@@ -180,13 +180,36 @@ public class Database : IDisposable
     // Contract: Assume valid data at this point
     // Compare (columnData) of (type) with against (filterPredicateValue) using (operator)
     // return true or false depending on match 
-    private bool CompareValues(
+    private static bool CompareValues(
         object columnData,
         SchemaPageFieldType type,
         QueryFilterOperator filterPredicateOperator,
         object filterPredicateValue)
     {
-        throw new NotImplementedException();
+        var comparison = type switch
+        {
+            SchemaPageFieldType.Integer => ((int) columnData).CompareTo((int) filterPredicateValue),
+            SchemaPageFieldType.Boolean => ((bool) columnData).CompareTo((bool) filterPredicateValue),
+            SchemaPageFieldType.Long => ((long) columnData).CompareTo((long) filterPredicateValue),
+            SchemaPageFieldType.String => StringComparer.Ordinal.Compare(
+                (string) columnData,
+                (string) filterPredicateValue),
+            _ => throw new InvalidDataException($"Unknown schema field type: {type}.")
+        };
+
+        return filterPredicateOperator switch
+        {
+            QueryFilterOperator.LessThan => comparison < 0,
+            QueryFilterOperator.GreaterThan => comparison > 0,
+            QueryFilterOperator.LessThanOrEqualTo => comparison <= 0,
+            QueryFilterOperator.GreaterThanOrEqualTo => comparison >= 0,
+            QueryFilterOperator.EqualTo => comparison == 0,
+            QueryFilterOperator.NotEqualTo => comparison != 0,
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(filterPredicateOperator),
+                filterPredicateOperator,
+                "Unknown query filter operator.")
+        };
     }
 
     private object GetData(SchemaPage schemaPage, Memory<byte> dataRow, string column)

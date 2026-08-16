@@ -28,7 +28,12 @@ await PrintRowsAsync(
     columns: ["Id", "FullName", "City", "LoyaltyPoints", "IsActive"],
     maximumRows: 8,
     format: row =>
-        $"#{row[0],4}  {row[1],-24}  {row[2],-14}  points: {row[3],5}  active: {row[4]}");
+        $"#{row[0],4}  {row[1],-24}  {row[2],-14}  points: {row[3],5}  active: {row[4]}",
+    filter:
+    [
+        new QueryFilter("LoyaltyPoints", QueryFilterOperator.GreaterThanOrEqualTo, 4_000),
+        new QueryFilter("IsActive", QueryFilterOperator.EqualTo, true)
+    ]);
 
 await PrintRowsAsync(
     database,
@@ -36,19 +41,20 @@ await PrintRowsAsync(
     columns: ["Sku", "Name", "Category", "PriceInCents", "UnitsInStock"],
     maximumRows: 10,
     format: row =>
-        $"{row[0],-10}  {row[1],-35}  {row[2],-16}  {FormatMoney((long) row[3]),9}  stock: {row[4]}");
+        $"{row[0],-10}  {row[1],-35}  {row[2],-16}  {FormatMoney((long) row[3]),9}  stock: {row[4]}",
+    filter:
+    [
+        new QueryFilter("PriceInCents", QueryFilterOperator.LessThan, 8_000L),
+        new QueryFilter("UnitsInStock", QueryFilterOperator.GreaterThan, 20)
+    ]);
 
 Console.WriteLine("\nRecent completed orders (filtered by the caller):");
 var displayedOrders = 0;
 await foreach (var row in database.SelectAsync(
                    "Orders",
-                   ["Id", "CustomerId", "PlacedAtUnixSeconds", "TotalInCents", "IsComplete"]))
+                   ["Id", "CustomerId", "PlacedAtUnixSeconds", "TotalInCents", "IsComplete"],
+                   [new QueryFilter("IsComplete", QueryFilterOperator.EqualTo, true)]))
 {
-    if (!(bool) row[4])
-    {
-        continue;
-    }
-
     var placedAt = DateTimeOffset.FromUnixTimeSeconds((long) row[2]);
     Console.WriteLine(
         $"Order #{row[0]}  customer #{row[1]}  {placedAt:yyyy-MM-dd}  {FormatMoney((long) row[3])}");
@@ -233,16 +239,13 @@ static async Task PrintRowsAsync(
     string tableName,
     string[] columns,
     int maximumRows,
-    Func<object[], string> format)
+    Func<object[], string> format,
+    QueryFilter[]? filter = null)
 {
     Console.WriteLine($"\n{tableName} sample:");
 
     var displayedRows = 0;
-    await foreach (var row in database.SelectAsync(tableName, columns,
-                   [
-                       new QueryFilter("Column", QueryFilterOperator.EqualTo, 3),
-                       new QueryFilter("AnotherColumn", QueryFilterOperator.LessThan, "Value")
-                   ]))
+    await foreach (var row in database.SelectAsync(tableName, columns, filter))
     {
         Console.WriteLine(format(row));
         if (++displayedRows == maximumRows)

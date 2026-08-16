@@ -202,7 +202,48 @@ public class SchemaManager(PageBufferManager pageBufferManager)
 
     public bool ValidateFilterAgainstSchema(SchemaPage schemaPage, QueryFilter[]? filter)
     {
-        // Confirm that each column in the filter exists, and each data type of the value in the filter matches that in the schema 
-        throw new NotImplementedException();
+        if (filter is null)
+        {
+            return true;
+        }
+
+        var fieldsByName = schemaPage.Fields.ToDictionary(field => field.Name, NameComparer);
+
+        foreach (var filterPredicate in filter)
+        {
+            if (!fieldsByName.TryGetValue(filterPredicate.Column, out var field) ||
+                !FilterValueMatchesFieldType(field.Type, filterPredicate.Value) ||
+                !FilterOperatorIsSupported(field.Type, filterPredicate.Operator))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool FilterValueMatchesFieldType(SchemaPageFieldType fieldType, object value)
+    {
+        return fieldType switch
+        {
+            SchemaPageFieldType.Integer => value is int,
+            SchemaPageFieldType.Boolean => value is bool,
+            SchemaPageFieldType.Long => value is long,
+            SchemaPageFieldType.String => value is string,
+            _ => false
+        };
+    }
+
+    private static bool FilterOperatorIsSupported(
+        SchemaPageFieldType fieldType,
+        QueryFilterOperator filterOperator)
+    {
+        if (!Enum.IsDefined(filterOperator))
+        {
+            return false;
+        }
+
+        return fieldType != SchemaPageFieldType.Boolean ||
+               filterOperator is QueryFilterOperator.EqualTo or QueryFilterOperator.NotEqualTo;
     }
 }
