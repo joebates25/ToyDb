@@ -1,6 +1,7 @@
 ﻿namespace ToyDb.Pages;
 
-using System.Buffers.Binary;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 public class DataPage(Memory<byte> data) : Page(data), IPageFactory<DataPage>
 {
@@ -29,34 +30,64 @@ public class DataPage(Memory<byte> data) : Page(data), IPageFactory<DataPage>
         | ...                               | records grow upward
         +-----------------------------------+ byte 4096
     */
-    private const int SlotCountOffset = 0;
-    private const int FreeSpaceEndOffset = SlotCountOffset + sizeof(int);
-    private const int OverFlowPageNumberOffset = FreeSpaceEndOffset + sizeof(int);
-    private const int HeaderSize = OverFlowPageNumberOffset + sizeof(int);
+    private const int DataPageHeaderSize = 12;
+    private const int DataPageSlotEntrySize = 5;
+
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    private struct DataPageHeader
+    {
+        internal int SlotCount;
+        internal int FreeSpaceEnd;
+        internal int OverFlowPageNumber;
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    private struct DataPageSlotEntry
+    {
+        internal byte InUse;
+        internal ushort OffsetStart;
+        internal ushort Length;
+    }
+
+    static DataPage()
+    {
+        if (DataPageHeaderSize != Unsafe.SizeOf<DataPageHeader>())
+            throw new InvalidOperationException("Data page header size is invalid");
+
+        if (DataPageSlotEntrySize != Unsafe.SizeOf<DataPageSlotEntry>())
+            throw new InvalidOperationException("Data page slot entry size is invalid");
+
+        if (!BitConverter.IsLittleEndian)
+            throw new PlatformNotSupportedException("Invalid machine. little endian needed");
+    }
+
+    private ref DataPageHeader Header => ref MemoryMarshal.AsRef<DataPageHeader>(Data.Span);
+
+    private Span<DataPageSlotEntry> SlotEntrySpace =>
+        MemoryMarshal.Cast<byte, DataPageSlotEntry>(Data.Span[DataPageHeaderSize..]);
 
     public int SlotCount
     {
-        get => BinaryPrimitives.ReadInt32LittleEndian(Data.Span[SlotCountOffset..]);
-        set => BinaryPrimitives.WriteInt32LittleEndian(Data.Span[SlotCountOffset..], value);
+        get => Header.SlotCount;
+        set => Header.SlotCount = value;
     }
 
     public int FreeSpaceEnd
     {
-        get => BinaryPrimitives.ReadInt32LittleEndian(Data.Span[FreeSpaceEndOffset..]);
-        set => BinaryPrimitives.WriteInt32LittleEndian(Data.Span[FreeSpaceEndOffset..], value);
+        get => Header.FreeSpaceEnd;
+        set => Header.FreeSpaceEnd = value;
     }
 
     public int OverFlowPageNumber
     {
-        get => BinaryPrimitives.ReadInt32LittleEndian(Data.Span[OverFlowPageNumberOffset..]);
-        set => BinaryPrimitives.WriteInt32LittleEndian(Data.Span[OverFlowPageNumberOffset..], value);
+        get => Header.OverFlowPageNumber;
+        set => Header.OverFlowPageNumber = value;
     }
 
     public IEnumerable<Slot> EnumerateSlots()
     {
         var slotCount = SlotCount;
-        var maximumSlotCount = (Data.Length - HeaderSize) / SlotSize;
-        if ((uint) slotCount > (uint) maximumSlotCount)
+        if ((uint) slotCount > (uint) SlotEntrySpace.Length)
         {
             throw new InvalidDataException(
                 $"Page contains an invalid slot count of {slotCount}.");
@@ -68,7 +99,7 @@ public class DataPage(Memory<byte> data) : Page(data), IPageFactory<DataPage>
         }
     }
 
-    public int FreeSpaceSize => FreeSpaceEnd - HeaderSize - (SlotSize * SlotCount);
+    public int FreeSpaceSize => FreeSpaceEnd - DataPageHeaderSize - (SlotSize * SlotCount);
 
     public Slot this[int index]
     {
@@ -79,14 +110,12 @@ public class DataPage(Memory<byte> data) : Page(data), IPageFactory<DataPage>
                 throw new ArgumentOutOfRangeException(nameof(index));
             }
 
-            var slotOffset = HeaderSize + SlotSize * index;
-            var slotData = Data.Span.Slice(slotOffset, SlotSize);
+            ref var slotEntry = ref SlotEntrySpace[index];
 
             return new Slot(
-                InUse: slotData[0] != 0,
-                OffsetStart: BinaryPrimitives.ReadUInt16LittleEndian(slotData[sizeof(bool)..]),
-                Length: BinaryPrimitives.ReadUInt16LittleEndian(
-                    slotData[(sizeof(bool) + sizeof(ushort))..]));
+                InUse: slotEntry.InUse != 0,
+                OffsetStart: slotEntry.OffsetStart,
+                Length: slotEntry.Length);
         }
     }
 
@@ -100,8 +129,8 @@ public class DataPage(Memory<byte> data) : Page(data), IPageFactory<DataPage>
                 $"Data requires {requiredSpace} bytes, but the page only has {FreeSpaceSize} bytes available.");
         }
 
-        // calculate offsets 
-        var slotOffset = HeaderSize + SlotSize * SlotCount;
+        // calculate offsets
+        var slotCount = SlotCount;
         var dataOffset = FreeSpaceEnd - data.Length;
 
         // Create slot based on data 
@@ -111,16 +140,16 @@ public class DataPage(Memory<byte> data) : Page(data), IPageFactory<DataPage>
             Length: checked((ushort) data.Length));
 
         // write slot
-        var slotSpan = Data.Span.Slice(slotOffset, SlotSize);
-        slotSpan[0] = slot.InUse ? (byte) 1 : (byte) 0;
-        BinaryPrimitives.WriteUInt16LittleEndian(slotSpan[sizeof(bool)..], slot.OffsetStart);
-        BinaryPrimitives.WriteUInt16LittleEndian(
-            slotSpan[(sizeof(bool) + sizeof(ushort))..], slot.Length);
+        ref var slotEntry = ref SlotEntrySpace[slotCount];
+        slotEntry = default;
+        slotEntry.InUse = slot.InUse ? (byte) 1 : (byte) 0;
+        slotEntry.OffsetStart = slot.OffsetStart;
+        slotEntry.Length = slot.Length;
 
         // write data 
         data.Span.CopyTo(Data.Span.Slice(dataOffset, data.Length));
         FreeSpaceEnd = dataOffset;
-        SlotCount++;
+        SlotCount = slotCount + 1;
 
         // return slot 
         return slot;
@@ -133,8 +162,7 @@ public class DataPage(Memory<byte> data) : Page(data), IPageFactory<DataPage>
             throw new ArgumentOutOfRangeException(nameof(slotIndex));
         }
 
-        var slotOffset = HeaderSize + SlotSize * slotIndex;
-        Data.Span[slotOffset] = 0;
+        SlotEntrySpace[slotIndex].InUse = 0;
     }
 
     public static DataPage CreatePage(Memory<byte> data)
@@ -156,5 +184,5 @@ public class DataPage(Memory<byte> data) : Page(data), IPageFactory<DataPage>
 
     public record Slot(bool InUse, ushort OffsetStart, ushort Length);
 
-    public const int SlotSize = sizeof(bool) + sizeof(ushort) + sizeof(ushort);
+    public const int SlotSize = DataPageSlotEntrySize;
 }
