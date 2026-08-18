@@ -56,9 +56,6 @@ public class DataPage(Memory<byte> data) : Page(data), IPageFactory<DataPage>
 
         if (DataPageSlotEntrySize != Unsafe.SizeOf<DataPageSlotEntry>())
             throw new InvalidOperationException("Data page slot entry size is invalid");
-
-        if (!BitConverter.IsLittleEndian)
-            throw new PlatformNotSupportedException("Invalid machine. little endian needed");
     }
 
     private ref DataPageHeader Header => ref MemoryMarshal.AsRef<DataPageHeader>(Data.Span);

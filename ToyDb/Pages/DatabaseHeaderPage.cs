@@ -1,4 +1,5 @@
-﻿using System.Buffers.Binary;
+﻿using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace ToyDb.Pages;
@@ -15,37 +16,60 @@ public class DatabaseHeaderPage(Memory<byte> data) : Page(data), IPageFactory<Da
         +-------------------------------------------+ byte 17
         | Version (4 bytes, LE)                     |
         +-------------------------------------------+ byte 21
-        | PageCount (4 bytes, LE)     |
+        | PageCount (4 bytes, LE)                   |
         +-------------------------------------------+ byte 25
         | SchemaDirectoryPageNumber (4 bytes, LE)   |
         +-------------------------------------------+ byte 29
         | Unused                                    |
         +-------------------------------------------+ byte 4096
     */
-    private const int WelcomeMessageLength = 17;
+    private const int WelcomeMessageLengthBytes = 17;
+    private const int DatabaseHeaderSize = WelcomeMessageLengthBytes + 3 * sizeof(int);
 
-    private const int VersionOffset = 17;
-    private const int PageCountOffset = 21;
-    private const int SchemaDirectoryOffset = 25;
+    [InlineArray(WelcomeMessageLengthBytes)]
+    private struct WelcomeMessageBuffer
+    {
+        private byte _element;
+    }
 
-    public string WelcomeMessage => Encoding.UTF8.GetString(Data.Span[..WelcomeMessageLength]);
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    private struct DatabaseHeader
+    {
+        internal WelcomeMessageBuffer WelcomeMessage;
+        internal int Version;
+        internal int PageCount;
+        internal int SchemaDirectoryPageNumber;
+    }
+
+    static DatabaseHeaderPage()
+    {
+        if (DatabaseHeaderSize != Unsafe.SizeOf<DatabaseHeader>())
+            throw new InvalidOperationException("Database header size is invalid");
+
+        if (Encoding.UTF8.GetByteCount(Constants.WelcomeMessage) != WelcomeMessageLengthBytes)
+            throw new InvalidOperationException("Database welcome message size is invalid");
+    }
+
+    private ref DatabaseHeader Header => ref MemoryMarshal.AsRef<DatabaseHeader>(Data.Span);
+
+    public string WelcomeMessage => Encoding.UTF8.GetString(Header.WelcomeMessage);
 
     public int Version
     {
-        get => BitConverter.ToInt32(Data.Span[VersionOffset..]);
-        set => BinaryPrimitives.WriteInt32LittleEndian(Data.Span[VersionOffset..], value);
+        get => Header.Version;
+        set => Header.Version = value;
     }
     
     public int PageCount
     {
-        get => BinaryPrimitives.ReadInt32LittleEndian(Data.Span[PageCountOffset..]);
-        set => BinaryPrimitives.WriteInt32LittleEndian(Data.Span[PageCountOffset..], value);
+        get => Header.PageCount;
+        set => Header.PageCount = value;
     }
 
     public int SchemaDirectoryPageNumber
     {
-        get => BitConverter.ToInt32(Data.Span[SchemaDirectoryOffset..]);
-        set => BinaryPrimitives.WriteInt32LittleEndian(Data.Span[SchemaDirectoryOffset..], value);
+        get => Header.SchemaDirectoryPageNumber;
+        set => Header.SchemaDirectoryPageNumber = value;
     }
 
     public static DatabaseHeaderPage CreatePage(Memory<byte> data)
@@ -55,7 +79,9 @@ public class DatabaseHeaderPage(Memory<byte> data) : Page(data), IPageFactory<Da
 
     public static DatabaseHeaderPage InitializePage(Memory<byte> data)
     {
-        Encoding.UTF8.GetBytes(Constants.WelcomeMessage).CopyTo(data.Span);
-        return new DatabaseHeaderPage(data);
+        var page = new DatabaseHeaderPage(data);
+        page.Header.WelcomeMessage = default;
+        Encoding.UTF8.GetBytes(Constants.WelcomeMessage).CopyTo(page.Header.WelcomeMessage);
+        return page;
     }
 }

@@ -2,14 +2,17 @@
 
 namespace ToyDb;
 
-using System.Buffers.Binary;
-using System.Text;
-
 public class Database : IDisposable
 {
     private const int EngineVersion = 2;
 
     private const int SchemaDirectoryPageNumber = 1;
+
+    static Database()
+    {
+        if (!BitConverter.IsLittleEndian)
+            throw new PlatformNotSupportedException("ToyDb requires a little-endian platform.");
+    }
 
     public DatabaseInfo Info { get; set; }
 

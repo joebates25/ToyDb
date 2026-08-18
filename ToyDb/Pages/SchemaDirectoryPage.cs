@@ -33,9 +33,6 @@ public class SchemaDirectoryPage(Memory<byte> data) : Page(data), IPageFactory<S
     {
         if (SchemaDirectoryPageHeaderSize != Unsafe.SizeOf<SchemaDirectoryPageHeader>())
             throw new InvalidOperationException("Schema directory page header size is invalid");
-
-        if (!BitConverter.IsLittleEndian)
-            throw new PlatformNotSupportedException("Invalid machine. little endian needed");
     }
 
     private ref SchemaDirectoryPageHeader Header =>

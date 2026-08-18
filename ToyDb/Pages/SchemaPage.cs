@@ -69,12 +69,6 @@ public class SchemaPage(Memory<byte> data) : Page(data), IPageFactory<SchemaPage
 
         if (SchemaFieldSize != Unsafe.SizeOf<SchemaFieldEntry>())
             throw new InvalidOperationException("Schema field size is invalid");
-
-        // todo: move to database.cs later
-        if (!BitConverter.IsLittleEndian)
-        {
-            throw new PlatformNotSupportedException("Invalid machine. little endian needed");
-        }
     }
 
     private ref SchemaPageHeader Header => ref MemoryMarshal.AsRef<SchemaPageHeader>(Data.Span);
