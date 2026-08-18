@@ -1,4 +1,5 @@
-﻿using System.Buffers.Binary;
+﻿using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace ToyDb.Pages;
@@ -7,7 +8,7 @@ public class SchemaPage(Memory<byte> data) : Page(data), IPageFactory<SchemaPage
 {
     /* Some specs:
         Max Schema name length: 128
-        Max num fields: ~31
+        Max num fields: ~30
         Max field name length: 128
         Max field size: 255
 
@@ -33,56 +34,103 @@ public class SchemaPage(Memory<byte> data) : Page(data), IPageFactory<SchemaPage
         |   +---------------------+ |
         +---------------------------+
     */
-    private const int NameLengthBytes = 128;
-    private const int FirstDataPageNumberOffset = NameLengthBytes;
-    private const int LastDataPageNumberOffset = FirstDataPageNumberOffset + sizeof(int);
-    private const int FieldCountOffset = LastDataPageNumberOffset + sizeof(int);
-    private const int FieldsOffset = FieldCountOffset + sizeof(int);
 
-    // default length 128 no matter what -- padded
+    private const int NameLengthBytes = 128;
+    private const int SchemaPageHeaderSize = 140;
+    private const int SchemaFieldSize = 130;
+
+    [InlineArray(NameLengthBytes)]
+    private struct SchemaString
+    {
+        private byte _element;
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    private struct SchemaPageHeader
+    {
+        internal SchemaString Name;
+        internal int FirstDataPageNumber;
+        internal int LastDataPageNumber;
+        internal int FieldCount;
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    private struct SchemaFieldEntry
+    {
+        internal SchemaString Name;
+        internal SchemaPageFieldType Type;
+        internal byte Length;
+    }
+
+    static SchemaPage()
+    {
+        if (SchemaPageHeaderSize != Unsafe.SizeOf<SchemaPageHeader>())
+            throw new InvalidOperationException("Schema page header size is invalid");
+
+        if (SchemaFieldSize != Unsafe.SizeOf<SchemaFieldEntry>())
+            throw new InvalidOperationException("Schema field size is invalid");
+
+        // todo: move to database.cs later
+        if (!BitConverter.IsLittleEndian)
+        {
+            throw new PlatformNotSupportedException("Invalid machine. little endian needed");
+        }
+    }
+
+    private ref SchemaPageHeader Header => ref MemoryMarshal.AsRef<SchemaPageHeader>(Data.Span);
+
+    private Span<SchemaFieldEntry> FieldEntrySpace =>
+        MemoryMarshal.Cast<byte, SchemaFieldEntry>(
+            Data.Span[SchemaPageHeaderSize..]);
+
     public string Name
     {
-        get => Encoding.UTF8.GetString(Data.Span[..NameLengthBytes]).TrimEnd('\0');
+        get => Encoding.UTF8.GetString(Header.Name).TrimEnd('\0');
         set
         {
-            Data.Span[..NameLengthBytes].Clear();
-            Encoding.UTF8.GetBytes(value).CopyTo(Data.Span[..NameLengthBytes]);
+            Header.Name = default;
+            Encoding.UTF8.GetBytes(value).CopyTo(Header.Name);
         }
     }
 
     public int FirstDataPageNumber
     {
-        get => BinaryPrimitives.ReadInt32LittleEndian(Data.Span[FirstDataPageNumberOffset..]);
-        set => BinaryPrimitives.WriteInt32LittleEndian(Data.Span[FirstDataPageNumberOffset..], value);
+        get => Header.FirstDataPageNumber;
+        set => Header.FirstDataPageNumber = value;
     }
 
     public int LastDataPageNumber
     {
-        get => BinaryPrimitives.ReadInt32LittleEndian(Data.Span[LastDataPageNumberOffset..]);
-        set => BinaryPrimitives.WriteInt32LittleEndian(Data.Span[LastDataPageNumberOffset..], value);
+        get => Header.LastDataPageNumber;
+        set => Header.LastDataPageNumber = value;
     }
 
     public int FieldCount
     {
-        get => BinaryPrimitives.ReadInt32LittleEndian(Data.Span[FieldCountOffset..]);
-        private set => BinaryPrimitives.WriteInt32LittleEndian(Data.Span[FieldCountOffset..], value);
+        get => Header.FieldCount;
+        private set => Header.FieldCount = value;
     }
 
     public SchemaPageField[] Fields
     {
         get
         {
-            var fields = new SchemaPageField[FieldCount];
+            var fieldCount = FieldCount;
+            if (fieldCount < 0 || fieldCount > FieldEntrySpace.Length)
+                throw new InvalidDataException("Invalid field count");
+
+            var fields = new SchemaPageField[fieldCount];
             var offset = 0;
 
             for (var i = 0; i < fields.Length; i++)
             {
-                var fieldSlot = Data.Span.Slice(FieldsOffset + i * FieldSizeBytes, FieldSizeBytes);
-                var name = Encoding.UTF8.GetString(fieldSlot[..NameLengthBytes]).TrimEnd('\0');
-                var type = (SchemaPageFieldType)fieldSlot[NameLengthBytes];
-                var length = fieldSlot[NameLengthBytes + 1];
+                ref var fieldEntry = ref FieldEntrySpace[i];
 
+                var name = Encoding.UTF8.GetString(fieldEntry.Name).TrimEnd('\0');
+                var type = fieldEntry.Type;
+                var length = fieldEntry.Length;
                 fields[i] = new SchemaPageField(name, type, length, offset);
+
                 offset += length;
             }
 
@@ -90,20 +138,21 @@ public class SchemaPage(Memory<byte> data) : Page(data), IPageFactory<SchemaPage
         }
     }
 
-    // Field size = 128 (name) + 1 (type) + 1 (length) = 130
-    private const int FieldSizeBytes = 128 + 1 + 1;
-
     public void AddField(string name, SchemaPageFieldType type, byte length)
     {
-        if (FieldCount == 31) throw new ArgumentOutOfRangeException(nameof(FieldCount));
+        var fieldCount = FieldCount;
 
-        var fieldSlot = Data.Span.Slice(FieldsOffset + FieldCount * FieldSizeBytes, FieldSizeBytes);
-        fieldSlot.Clear();
-        Encoding.UTF8.GetBytes(name).CopyTo(fieldSlot);
-        fieldSlot[NameLengthBytes] = (byte)type;
-        fieldSlot[NameLengthBytes + 1] = length;
+        if (fieldCount >= FieldEntrySpace.Length || fieldCount < 0)
+            throw new ArgumentOutOfRangeException(nameof(fieldCount));
 
-        FieldCount++;
+        ref var fieldSlot = ref FieldEntrySpace[fieldCount];
+        fieldSlot = default;
+
+        Encoding.UTF8.GetBytes(name).CopyTo(fieldSlot.Name);
+        fieldSlot.Type   = type;
+        fieldSlot.Length = length;
+
+        FieldCount = fieldCount + 1;
     }
 
     public static SchemaPage CreatePage(Memory<byte> data)
@@ -117,8 +166,6 @@ public class SchemaPage(Memory<byte> data) : Page(data), IPageFactory<SchemaPage
     }
 }
 
-public record SchemaPageField(string Name, SchemaPageFieldType Type, int Length, int Offset);
-
 public enum SchemaPageFieldType : byte
 {
     Integer,
@@ -126,3 +173,5 @@ public enum SchemaPageFieldType : byte
     Long,
     String
 }
+
+public record SchemaPageField(string Name, SchemaPageFieldType Type, int Length, int Offset);
