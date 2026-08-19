@@ -87,7 +87,7 @@ public class Database : IDisposable
     {
         return _schemaManager.AddSchemaAsync(schema);
     }
-    
+
     public Task RemoveSchemaAsync(string schemaName)
     {
         return _schemaManager.RemoveSchemaAsync(schemaName);
@@ -96,6 +96,13 @@ public class Database : IDisposable
     public Task<int> InsertAsync(string tableName, string[] columns, object[][] valueSets)
     {
         return _executionEngine.InsertAsync(tableName, columns, valueSets);
+    }
+
+    public Task<int> DeleteAsync(
+        string tableName,
+        QueryFilter[]? filter = null)
+    {
+        return _executionEngine.DeleteAsync(tableName, filter);
     }
 
     public IAsyncEnumerable<object[]> SelectAsync(

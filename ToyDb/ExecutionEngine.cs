@@ -87,6 +87,46 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
         } while (dataPageNumber != -1);
     }
 
+    public async Task<int> DeleteAsync(
+        string tableName,
+        QueryFilter[]? filter = null)
+    {
+        if (!schemaManager.HasSchema(tableName))
+        {
+            throw new Exception($"Table {tableName} does not exist.");
+        }
+
+        var schemaPage = await schemaManager.GetSchemaAsync(tableName);
+
+        if (filter is not null && !schemaManager.ValidateFilterAgainstSchema(schemaPage, filter))
+        {
+            throw new Exception("Invalid filter provided");
+        }
+
+        var dataPageNumber = schemaPage.FirstDataPageNumber;
+        var deleteCount = 0;
+        do
+        {
+            var dataPage = await pageBufferManager.ReadPageAsync<DataPage>(dataPageNumber);
+            dataPageNumber = dataPage.OverFlowPageNumber;
+
+            for (var slotNum = 0; slotNum < dataPage.SlotCount; slotNum++)
+            {
+                var slot = dataPage[slotNum];
+                if (!slot.InUse) continue;
+
+                var dataRow = dataPage.Data.Slice(slot.OffsetStart, slot.Length);
+
+                if (!DataRowPassesFilter(schemaPage, dataRow, filter)) continue;
+
+                dataPage.FreeSlot(slotNum);
+                deleteCount++;
+            }
+        } while (dataPageNumber != -1);
+
+        return deleteCount;
+    }
+
     private bool DataRowPassesFilter(SchemaPage schemaPage, Memory<byte> dataRow, QueryFilter[]? filter)
     {
         if (filter is null) return true;

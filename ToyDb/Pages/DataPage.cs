@@ -114,6 +114,20 @@ public class DataPage(Memory<byte> data) : Page(data), IPageFactory<DataPage>
                 OffsetStart: slotEntry.OffsetStart,
                 Length: slotEntry.Length);
         }
+        internal set
+        {
+            if (index < 0 || index >= SlotCount)
+            {
+                throw new ArgumentOutOfRangeException(nameof(index));
+            }
+
+            SlotEntrySpace[index] = new DataPageSlotEntry
+            {
+                InUse       = (byte) (value.InUse ? 1 : 0),
+                OffsetStart = value.OffsetStart,
+                Length      = value.Length
+            };
+        }
     }
 
     public Slot InsertData(ReadOnlyMemory<byte> data)
@@ -138,15 +152,15 @@ public class DataPage(Memory<byte> data) : Page(data), IPageFactory<DataPage>
 
         // write slot
         ref var slotEntry = ref SlotEntrySpace[slotCount];
-        slotEntry = default;
-        slotEntry.InUse = slot.InUse ? (byte) 1 : (byte) 0;
+        slotEntry             = default;
+        slotEntry.InUse       = slot.InUse ? (byte) 1 : (byte) 0;
         slotEntry.OffsetStart = slot.OffsetStart;
-        slotEntry.Length = slot.Length;
+        slotEntry.Length      = slot.Length;
 
         // write data 
         data.Span.CopyTo(Data.Span.Slice(dataOffset, data.Length));
         FreeSpaceEnd = dataOffset;
-        SlotCount = slotCount + 1;
+        SlotCount    = slotCount + 1;
 
         // return slot 
         return slot;
