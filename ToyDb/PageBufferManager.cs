@@ -2,53 +2,81 @@
 
 namespace ToyDb;
 
-public class PageBufferManager(FileIoManager fileIoManager, PageBufferConfig? pageBufferConfig) : IDisposable
-{
-    private readonly Memory<byte> _shittyBigAssBuffer =
-        new byte[Constants.PageSizeBytes * pageBufferConfig?.FrameCount ?? 2_000];
+using PageNumber = int;
+using FrameNumber = int;
 
-    private readonly HashSet<int> _pageBufferTable = new();
+public class PageBufferManager : IDisposable
+{
+    private int FrameCount { get; }
+
+    private readonly Memory<byte> _bufferPool;
+
+    private readonly Dictionary<PageNumber, FrameNumber> _pageBufferTable = new();
+
+    private readonly Stack<int> _freeFrames;
+    private readonly FileIoManager _fileIoManager;
+
+    public PageBufferManager(FileIoManager fileIoManager, PageBufferConfig? pageBufferConfig)
+    {
+        _fileIoManager      = fileIoManager;
+        FrameCount          = pageBufferConfig?.FrameCount ?? 2_000;
+        _bufferPool = new byte[Constants.PageSizeBytes * pageBufferConfig?.FrameCount ?? 2_000];
+
+        _freeFrames = new Stack<int>(Enumerable.Range(0, FrameCount).Reverse());
+    }
 
     public async Task<TPage> ReadPageAsync<TPage>(int pageNumber) where TPage : Page, IPageFactory<TPage>
     {
-        var bufferSlice = _shittyBigAssBuffer.Slice(pageNumber * Constants.PageSizeBytes, Constants.PageSizeBytes);
-        if (!_pageBufferTable.Contains(pageNumber))
-        {
-            bufferSlice.Span.Fill(0);
-            await fileIoManager.ReadAsync(pageNumber * Constants.PageSizeBytes, bufferSlice);
-            _pageBufferTable.Add(pageNumber);
-        }
+        var hasPage = _pageBufferTable.TryGetValue(pageNumber, out var frameNumber);
 
+        if (hasPage) return TPage.CreatePage(GetBufferFrame(frameNumber));
+
+        frameNumber = GetFirstFreeFrameNumber();
+        var bufferSlice =
+            GetBufferFrame(frameNumber);
+        bufferSlice.Span.Clear();
+        await _fileIoManager.ReadAsync(pageNumber * Constants.PageSizeBytes, bufferSlice);
+        _pageBufferTable.Add(pageNumber, frameNumber);
         return TPage.CreatePage(bufferSlice);
     }
 
     public TPage AllocatePage<TPage>(int pageNumber) where TPage : Page, IPageFactory<TPage>
     {
-        if (_pageBufferTable.Contains(pageNumber)) throw new InvalidOperationException($"Page {pageNumber} already allocated");
+        if (HasPage(pageNumber))
+            throw new InvalidOperationException($"Page {pageNumber} already allocated");
 
-        var bufferSlice = _shittyBigAssBuffer.Slice(pageNumber * Constants.PageSizeBytes, Constants.PageSizeBytes);
+        var firstFreeFrameNumber = GetFirstFreeFrameNumber();
+        var bufferSlice =
+            _bufferPool.Slice(firstFreeFrameNumber * Constants.PageSizeBytes, Constants.PageSizeBytes);
         bufferSlice.Span.Fill(0);
-        _pageBufferTable.Add(pageNumber);
+        _pageBufferTable.Add(pageNumber, firstFreeFrameNumber);
 
         return TPage.InitializePage(bufferSlice);
     }
 
     public async Task FlushAsync()
     {
-        foreach (var pageNumber in _pageBufferTable)
+        foreach (var pageBufferTableEntry in _pageBufferTable)
         {
+            var frame = pageBufferTableEntry.Value;
             var pageMemory =
-                (ReadOnlyMemory<byte>) _shittyBigAssBuffer.Slice(pageNumber * Constants.PageSizeBytes,
-                    Constants.PageSizeBytes);
-            await fileIoManager.WriteAsync(pageNumber * Constants.PageSizeBytes, pageMemory);
+                (ReadOnlyMemory<byte>) GetBufferFrame(frame);
+            await _fileIoManager.WriteAsync(pageBufferTableEntry.Key * Constants.PageSizeBytes, pageMemory);
         }
 
-        await fileIoManager.FlushAsync();
+        await _fileIoManager.FlushAsync();
     }
+
+    private FrameNumber GetFirstFreeFrameNumber() => _freeFrames.Pop();
+
+    private bool HasPage(int pageNumber) => _pageBufferTable.ContainsKey(pageNumber);
+
+    private Memory<byte> GetBufferFrame(int frameNumber) =>
+        _bufferPool.Slice(frameNumber * Constants.PageSizeBytes, Constants.PageSizeBytes);
 
     public void Dispose()
     {
-        fileIoManager.Dispose();
+        _fileIoManager.Dispose();
     }
 }
 
