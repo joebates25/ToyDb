@@ -7,22 +7,20 @@ using FrameNumber = int;
 
 public class PageBufferManager : IDisposable
 {
-    private int FrameCount { get; }
-
+    private readonly FileIoManager _fileIoManager;
+    
     private readonly Memory<byte> _bufferPool;
 
     private readonly Dictionary<PageNumber, FrameNumber> _pageBufferTable = new();
-
     private readonly Stack<int> _freeFrames;
-    private readonly FileIoManager _fileIoManager;
-
+    
     public PageBufferManager(FileIoManager fileIoManager, PageBufferConfig? pageBufferConfig)
     {
-        _fileIoManager      = fileIoManager;
-        FrameCount          = pageBufferConfig?.FrameCount ?? 2_000;
-        _bufferPool = new byte[Constants.PageSizeBytes * pageBufferConfig?.FrameCount ?? 2_000];
+        var frameCount = pageBufferConfig?.FrameCount ?? 2_000;
 
-        _freeFrames = new Stack<int>(Enumerable.Range(0, FrameCount).Reverse());
+        _fileIoManager = fileIoManager;
+        _bufferPool    = new byte[Constants.PageSizeBytes * frameCount];
+        _freeFrames    = new Stack<int>(Enumerable.Range(0, frameCount).Reverse());
     }
 
     public async Task<TPage> ReadPageAsync<TPage>(int pageNumber) where TPage : Page, IPageFactory<TPage>
