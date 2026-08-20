@@ -1,4 +1,4 @@
-This is a little toy database made because it seems cool to implement an actual database, not just a text file that is "technically a database ;)". I'm trying to avoid looking at any code, and just rely on lectures (CMU ftw), textbooks and blogs. This uses c# and not something like Rust, C or C++ because I value my sanity and wellbeing and want to actually enjoy this.
+This is a little toy database made because it seems cool to implement an actual storage engine, not just a text file that is "technically a database ;)". I'm trying to avoid looking at any code, and just rely on lectures (CMU ftw), textbooks and blogs. This uses c# and not something like Rust, C or C++ because I value my sanity and wellbeing and want to actually enjoy this.
 
 It uses a basic paging scheme with slotted pages and everything is stored in one file. No indexes right now but that's coming soon. 
 
