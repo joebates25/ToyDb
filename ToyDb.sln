@@ -2,6 +2,8 @@
 Microsoft Visual Studio Solution File, Format Version 12.00
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ToyDb", "ToyDb\ToyDb.csproj", "{91AA8B4A-D161-43A8-B780-2EF7CEE10732}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ToyDb.Tests", "ToyDb.Tests\ToyDb.Tests.csproj", "{8C2A5E72-30B0-4AA3-8A12-ECB33A4EC8EF}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -12,5 +14,9 @@ Global
 		{91AA8B4A-D161-43A8-B780-2EF7CEE10732}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{91AA8B4A-D161-43A8-B780-2EF7CEE10732}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{91AA8B4A-D161-43A8-B780-2EF7CEE10732}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8C2A5E72-30B0-4AA3-8A12-ECB33A4EC8EF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8C2A5E72-30B0-4AA3-8A12-ECB33A4EC8EF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8C2A5E72-30B0-4AA3-8A12-ECB33A4EC8EF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8C2A5E72-30B0-4AA3-8A12-ECB33A4EC8EF}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
