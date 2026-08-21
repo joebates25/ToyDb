@@ -1,4 +1,5 @@
 ﻿using System.Collections;
+using Microsoft.Extensions.Logging;
 
 namespace ToyDb;
 
@@ -7,24 +8,28 @@ using FrameNumber = int;
 
 public class PageBufferManager : IDisposable
 {
+    private readonly ILogger _logger;
+
     private readonly FileIoManager _fileIoManager;
-    
+
     private readonly Memory<byte> _bufferPool;
 
     private readonly Dictionary<PageNumber, FrameNumber> _pageBufferTable = new();
     private readonly Stack<int> _freeFrames;
-    
+
     public PageBufferManager(FileIoManager fileIoManager, PageBufferConfig? pageBufferConfig)
     {
         var frameCount = pageBufferConfig?.FrameCount ?? 2_000;
 
         _fileIoManager = fileIoManager;
+        _logger        = Logging.LoggerFactory.CreateLogger<FileIoManager>();
         _bufferPool    = new byte[Constants.PageSizeBytes * frameCount];
         _freeFrames    = new Stack<int>(Enumerable.Range(0, frameCount).Reverse());
     }
 
     public async Task<TPage> ReadPageAsync<TPage>(int pageNumber) where TPage : Page, IPageFactory<TPage>
     {
+        _logger.Log(LogLevel.Information, $"Reading page {pageNumber}");
         var hasPage = _pageBufferTable.TryGetValue(pageNumber, out var frameNumber);
 
         if (hasPage) return TPage.CreatePage(GetBufferFrame(frameNumber));
@@ -40,6 +45,7 @@ public class PageBufferManager : IDisposable
 
     public TPage AllocatePage<TPage>(int pageNumber) where TPage : Page, IPageFactory<TPage>
     {
+        _logger.Log(LogLevel.Information, $"Allocating page {pageNumber}");
         if (HasPage(pageNumber))
             throw new InvalidOperationException($"Page {pageNumber} already allocated");
 
@@ -54,6 +60,7 @@ public class PageBufferManager : IDisposable
 
     public async Task FlushAsync()
     {
+        _logger.Log(LogLevel.Information, "Flushing page buffers");
         foreach (var pageBufferTableEntry in _pageBufferTable)
         {
             var frame = pageBufferTableEntry.Value;
