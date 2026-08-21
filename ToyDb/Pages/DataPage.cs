@@ -26,7 +26,7 @@ public class DataPage(Memory<byte> data) : Page(data), IPageFactory<DataPage>
         | Free space                        |
         |                                   |
         +-----------------------------------+ byte FreeSpaceEnd
-        | Record data                       |
+        | cell data                         |
         | ...                               | records grow upward
         +-----------------------------------+ byte 4096
     */
@@ -42,7 +42,7 @@ public class DataPage(Memory<byte> data) : Page(data), IPageFactory<DataPage>
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    private struct DataPageSlotEntry
+    private struct DataPageSlot
     {
         internal byte InUse;
         internal ushort OffsetStart;
@@ -54,14 +54,14 @@ public class DataPage(Memory<byte> data) : Page(data), IPageFactory<DataPage>
         if (DataPageHeaderSize != Unsafe.SizeOf<DataPageHeader>())
             throw new InvalidOperationException("Data page header size is invalid");
 
-        if (DataPageSlotEntrySize != Unsafe.SizeOf<DataPageSlotEntry>())
+        if (DataPageSlotEntrySize != Unsafe.SizeOf<DataPageSlot>())
             throw new InvalidOperationException("Data page slot entry size is invalid");
     }
 
     private ref DataPageHeader Header => ref MemoryMarshal.AsRef<DataPageHeader>(Data.Span);
 
-    private Span<DataPageSlotEntry> SlotEntrySpace =>
-        MemoryMarshal.Cast<byte, DataPageSlotEntry>(Data.Span[DataPageHeaderSize..]);
+    private Span<DataPageSlot> Slots =>
+        MemoryMarshal.Cast<byte, DataPageSlot>(Data.Span[DataPageHeaderSize..]);
 
     public int SlotCount
     {
@@ -84,7 +84,7 @@ public class DataPage(Memory<byte> data) : Page(data), IPageFactory<DataPage>
     public IEnumerable<Slot> EnumerateSlots()
     {
         var slotCount = SlotCount;
-        if ((uint) slotCount > (uint) SlotEntrySpace.Length)
+        if ((uint) slotCount > (uint) Slots.Length)
         {
             throw new InvalidDataException(
                 $"Page contains an invalid slot count of {slotCount}.");
@@ -107,7 +107,7 @@ public class DataPage(Memory<byte> data) : Page(data), IPageFactory<DataPage>
                 throw new ArgumentOutOfRangeException(nameof(index));
             }
 
-            ref var slotEntry = ref SlotEntrySpace[index];
+            ref var slotEntry = ref Slots[index];
 
             return new Slot(
                 InUse: slotEntry.InUse != 0,
@@ -121,7 +121,7 @@ public class DataPage(Memory<byte> data) : Page(data), IPageFactory<DataPage>
                 throw new ArgumentOutOfRangeException(nameof(index));
             }
 
-            SlotEntrySpace[index] = new DataPageSlotEntry
+            Slots[index] = new DataPageSlot
             {
                 InUse       = (byte) (value.InUse ? 1 : 0),
                 OffsetStart = value.OffsetStart,
@@ -130,10 +130,10 @@ public class DataPage(Memory<byte> data) : Page(data), IPageFactory<DataPage>
         }
     }
 
-    public Slot InsertData(ReadOnlyMemory<byte> data)
+    public Slot InsertCell(ReadOnlyMemory<byte> cellData)
     {
         // Confirm enough space
-        var requiredSpace = SlotSize + data.Length;
+        var requiredSpace = SlotSize + cellData.Length;
         if (requiredSpace > FreeSpaceSize)
         {
             throw new InvalidOperationException(
@@ -142,23 +142,23 @@ public class DataPage(Memory<byte> data) : Page(data), IPageFactory<DataPage>
 
         // calculate offsets
         var slotCount = SlotCount;
-        var dataOffset = FreeSpaceEnd - data.Length;
+        var dataOffset = FreeSpaceEnd - cellData.Length;
 
         // Create slot based on data 
         var slot = new Slot(
             InUse: true,
             OffsetStart: checked((ushort) dataOffset),
-            Length: checked((ushort) data.Length));
+            Length: checked((ushort) cellData.Length));
 
         // write slot
-        ref var slotEntry = ref SlotEntrySpace[slotCount];
+        ref var slotEntry = ref Slots[slotCount];
         slotEntry             = default;
         slotEntry.InUse       = slot.InUse ? (byte) 1 : (byte) 0;
         slotEntry.OffsetStart = slot.OffsetStart;
         slotEntry.Length      = slot.Length;
 
         // write data 
-        data.Span.CopyTo(Data.Span.Slice(dataOffset, data.Length));
+        cellData.Span.CopyTo(Data.Span.Slice(dataOffset, cellData.Length));
         FreeSpaceEnd = dataOffset;
         SlotCount    = slotCount + 1;
 
@@ -173,7 +173,7 @@ public class DataPage(Memory<byte> data) : Page(data), IPageFactory<DataPage>
             throw new ArgumentOutOfRangeException(nameof(slotIndex));
         }
 
-        SlotEntrySpace[slotIndex].InUse = 0;
+        Slots[slotIndex].InUse = 0;
     }
 
     public static DataPage CreatePage(Memory<byte> data)

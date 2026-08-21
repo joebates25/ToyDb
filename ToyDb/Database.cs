@@ -80,6 +80,7 @@ public class Database : IDisposable
 
     public void Dispose()
     {
+        _pageBufferManager.FlushAsync().GetAwaiter().GetResult();
         _pageBufferManager.Dispose();
     }
 

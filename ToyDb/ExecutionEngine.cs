@@ -39,7 +39,7 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
                 schemaPage.LastDataPageNumber = insertedPageNumber;
             }
 
-            insertPage.InsertData(rowData);
+            insertPage.InsertCell(rowData);
             insertedRowCount++;
         }
 

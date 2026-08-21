@@ -81,6 +81,7 @@ public class PageBufferManager : IDisposable
 
     public void Dispose()
     {
+        _fileIoManager.FlushAsync().GetAwaiter().GetResult();
         _fileIoManager.Dispose();
     }
 }
