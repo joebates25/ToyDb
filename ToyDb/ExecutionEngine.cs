@@ -56,6 +56,7 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
             throw new Exception($"Table {tableName} does not exist.");
         }
 
+        
         var schemaPage = await schemaManager.GetSchemaAsync(tableName);
         if (!schemaManager.ValidateColumnsAgainstSchema(schemaPage, columns))
         {
@@ -68,6 +69,9 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
         }
 
         var dataPageNumber = schemaPage.FirstDataPageNumber;
+        // step 1: assume we save some schema info in memory
+        // todo: handle schema clear
+        // pageBufferManager.FreePage(schemaPage);
         do
         {
             var dataPage = await pageBufferManager.ReadPageAsync<DataPage>(dataPageNumber);
@@ -84,6 +88,8 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
                     yield return columns.Select(column => GetData(schemaPage, dataRow, column)).ToArray();
                 }
             }
+
+            pageBufferManager.FreePage(dataPageNumber);
         } while (dataPageNumber != -1);
     }
 
@@ -104,6 +110,8 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
         }
 
         var dataPageNumber = schemaPage.FirstDataPageNumber;
+        // step 2: if we had schema page:
+        // pageBufferManager.FreePage(schemaPage);
         var deleteCount = 0;
         do
         {
