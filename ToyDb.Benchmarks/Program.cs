@@ -2,7 +2,7 @@ using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Running;
 using ToyDb;
 
-BenchmarkRunner.Run<DatabaseBenchmarks>();
+BenchmarkSwitcher.FromTypes([typeof(DatabaseBenchmarks)]).Run(args);
 
 [MemoryDiagnoser]
 public class DatabaseBenchmarks
