@@ -2,6 +2,7 @@
 
 namespace ToyDb;
 
+using System.Collections.ObjectModel;
 using PageNumber = int;
 using FrameNumber = int;
 
@@ -14,7 +15,7 @@ public class PageBufferManager : IDisposable
     private readonly Memory<byte> _bufferPool;
 
     private readonly Dictionary<PageNumber, BufferTableEntry> _pageBufferTable = new();
-    private readonly PriorityQueue<int, long> _evictionQueue = new();
+    private readonly IEvictionPolicy _evictionPolicy;
     private readonly Stack<int> _freeFrames;
 
     public PageBufferManager(FileIoManager fileIoManager, PageBufferConfig? pageBufferConfig)
@@ -25,15 +26,20 @@ public class PageBufferManager : IDisposable
         _logger        = Logging.LoggerFactory.CreateLogger<FileIoManager>();
         _bufferPool    = new byte[Constants.PageSizeBytes * frameCount];
         _freeFrames    = new Stack<int>(Enumerable.Range(0, frameCount).Reverse());
+        _evictionPolicy = new LifoEvictionPolicy(
+            new ReadOnlyDictionary<int, BufferTableEntry>(_pageBufferTable));
     }
 
     public async Task<TPage> ReadPageAsync<TPage>(int pageNumber) where TPage : Page, IPageFactory<TPage>
     {
         // todo: handle full buffer pool
         _logger.Log(LogLevel.Information, $"Reading page {pageNumber}");
-        var hasPage = _pageBufferTable.TryGetValue(pageNumber, out var frame);
-
-        if (hasPage) return TPage.CreatePage(GetBufferFrame(frame!.FrameNumber));
+        if (_pageBufferTable.TryGetValue(pageNumber, out var frame))
+        {
+            _pageBufferTable[pageNumber] = frame with {PinCount = frame.PinCount + 1};
+            _evictionPolicy.UsePage(pageNumber);
+            return TPage.CreatePage(GetBufferFrame(frame.FrameNumber));
+        }
 
         // todo: if anything fails, frame stays unfree. need to fix
         var frameNumber = GetFirstFreeFrameNumber();
@@ -41,18 +47,8 @@ public class PageBufferManager : IDisposable
         bufferSlice.Span.Clear();
         await _fileIoManager.ReadAsync(pageNumber * Constants.PageSizeBytes, bufferSlice);
 
-        if (_pageBufferTable.TryGetValue(pageNumber, out BufferTableEntry? entry))
-        {
-            _pageBufferTable[pageNumber] = entry with
-            {
-                PinCount = entry.PinCount + 1
-            };
-        }
-        else
-        {
-            _pageBufferTable.Add(pageNumber, BufferTableEntry.Create(frameNumber));
-            _evictionQueue.Remove(pageNumber, out _, out _);
-        }
+        _pageBufferTable.Add(pageNumber, BufferTableEntry.Create(frameNumber));
+        _evictionPolicy.UsePage(pageNumber);
 
         return TPage.CreatePage(bufferSlice);
     }
@@ -118,27 +114,26 @@ public class PageBufferManager : IDisposable
         var newPinCount = frame.PinCount > 0 ? frame.PinCount - 1 : 0;
         _pageBufferTable[pageNumber] = frame with {PinCount = newPinCount};
 
-        if (newPinCount == 0)
+        if (frame.PinCount == 1)
         {
-            _evictionQueue.Enqueue(pageNumber, DateTime.Now.Ticks);
+            _evictionPolicy.FreePage(pageNumber);
         }
     }
 
     private bool TryEvictPage(out int evictFrame)
     {
-        evictFrame = 0;
+        if (!_evictionPolicy.TryEvict(out evictFrame)) return false;
 
-        // Page is not in eviction queue -- abort 
-        if (!_evictionQueue.TryDequeue(out var pageNumber, out _)) return false;
-
-        evictFrame = _pageBufferTable[pageNumber].FrameNumber;
+        var frameNumber = evictFrame;
+        var pageNumber = _pageBufferTable
+            .First(entry => entry.Value.FrameNumber == frameNumber)
+            .Key;
         _pageBufferTable.Remove(pageNumber);
-        _freeFrames.Push(evictFrame);
         return true;
     }
 }
 
-record BufferTableEntry(int FrameNumber, bool Dirty, int PinCount)
+public record BufferTableEntry(int FrameNumber, bool Dirty, int PinCount)
 {
     public static BufferTableEntry Create(int frameNumber) => new(frameNumber, false, 1);
 }
