@@ -13,22 +13,22 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
         {
             throw new Exception($"Table {tableName} does not exist.");
         }
-
-        var schemaPage = await schemaManager.GetSchemaAsync(tableName);
-        if (!schemaManager.ValidateColumnsAgainstSchema(schemaPage, columns))
+        var schema = schemaManager.GetSchema(tableName);
+        if (!schemaManager.ValidateColumnsAgainstSchema(schema, columns))
         {
             throw new Exception("Invalid columns provided");
         }
 
-        var insertPage = await pageBufferManager.ReadPageAsync<DataPage>(schemaPage.LastDataPageNumber);
+        var insertPage = await pageBufferManager.ReadPageAsync<DataPage>(
+            schemaManager.GetLastDataPageNumber(tableName));
         foreach (var valueSet in valueSets)
         {
-            if (!TryValueSetValidation(schemaPage, columns, valueSet, out var errorMessage))
+            if (!TryValueSetValidation(schema, columns, valueSet, out var errorMessage))
             {
                 throw new Exception(errorMessage);
             }
 
-            var rowData = ConvertDataToBytes(schemaPage, columns, valueSet);
+            var rowData = ConvertDataToBytes(schema, columns, valueSet);
             if (!HasFreeSpaceForInsert(insertPage, rowData.Length))
             {
                 var headerPage = await pageBufferManager.ReadPageAsync<DatabaseHeaderPage>(0);
@@ -36,7 +36,7 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
                 var newDataPage = pageBufferManager.AllocatePage<DataPage>(insertedPageNumber);
                 insertPage.OverFlowPageNumber = insertedPageNumber;
                 insertPage                    = newDataPage;
-                schemaPage.LastDataPageNumber = insertedPageNumber;
+                await schemaManager.UpdateLastDataPageNumberAsync(tableName, insertedPageNumber);
             }
 
             insertPage.InsertCell(rowData);
@@ -57,21 +57,18 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
         }
 
         
-        var schemaPage = await schemaManager.GetSchemaAsync(tableName);
-        if (!schemaManager.ValidateColumnsAgainstSchema(schemaPage, columns))
+        var schema = schemaManager.GetSchema(tableName);
+        if (!schemaManager.ValidateColumnsAgainstSchema(schema, columns))
         {
             throw new Exception("Invalid columns provided");
         }
 
-        if (filter is not null && !schemaManager.ValidateFilterAgainstSchema(schemaPage, filter))
+        if (filter is not null && !schemaManager.ValidateFilterAgainstSchema(schema, filter))
         {
             throw new Exception("Invalid filter provided");
         }
 
-        var dataPageNumber = schemaPage.FirstDataPageNumber;
-        // step 1: assume we save some schema info in memory
-        // todo: handle schema clear
-        // pageBufferManager.FreePage(schemaPage);
+        var dataPageNumber = schemaManager.GetFirstDataPageNumber(tableName);
         do
         {
             var dataPage = await pageBufferManager.ReadPageAsync<DataPage>(dataPageNumber);
@@ -83,9 +80,9 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
 
                 var dataRow = dataPage.Data.Slice(slot.OffsetStart, slot.Length);
 
-                if (DataRowPassesFilter(schemaPage, dataRow, filter))
+                if (DataRowPassesFilter(schema, dataRow, filter))
                 {
-                    yield return columns.Select(column => GetData(schemaPage, dataRow, column)).ToArray();
+                    yield return columns.Select(column => GetData(schema, dataRow, column)).ToArray();
                 }
             }
 
@@ -102,16 +99,14 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
             throw new Exception($"Table {tableName} does not exist.");
         }
 
-        var schemaPage = await schemaManager.GetSchemaAsync(tableName);
+        var schema = schemaManager.GetSchema(tableName);
 
-        if (filter is not null && !schemaManager.ValidateFilterAgainstSchema(schemaPage, filter))
+        if (filter is not null && !schemaManager.ValidateFilterAgainstSchema(schema, filter))
         {
             throw new Exception("Invalid filter provided");
         }
 
-        var dataPageNumber = schemaPage.FirstDataPageNumber;
-        // step 2: if we had schema page:
-        // pageBufferManager.FreePage(schemaPage);
+        var dataPageNumber = schemaManager.GetFirstDataPageNumber(tableName);
         var deleteCount = 0;
         do
         {
@@ -125,7 +120,7 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
 
                 var dataRow = dataPage.Data.Slice(slot.OffsetStart, slot.Length);
 
-                if (!DataRowPassesFilter(schemaPage, dataRow, filter)) continue;
+                if (!DataRowPassesFilter(schema, dataRow, filter)) continue;
 
                 dataPage.FreeSlot(slotNum);
                 deleteCount++;
@@ -135,15 +130,15 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
         return deleteCount;
     }
 
-    private bool DataRowPassesFilter(SchemaPage schemaPage, Memory<byte> dataRow, QueryFilter[]? filter)
+    private bool DataRowPassesFilter(Schema schema, Memory<byte> dataRow, QueryFilter[]? filter)
     {
         if (filter is null) return true;
 
         return filter.All(filterPredicate =>
         {
-            var columnData = GetData(schemaPage, dataRow, filterPredicate.Column);
+            var columnData = GetData(schema, dataRow, filterPredicate.Column);
             return CompareValues(columnData,
-                schemaPage.Fields.First(x => x.Name == filterPredicate.Column).Type,
+                schema.Fields.First(x => x.Name == filterPredicate.Column).Type,
                 filterPredicate.Operator,
                 filterPredicate.Value);
         });
@@ -154,16 +149,16 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
     // return true or false depending on match 
     private static bool CompareValues(
         object columnData,
-        SchemaPageFieldType type,
+        SchemaFieldType type,
         QueryFilterOperator filterPredicateOperator,
         object filterPredicateValue)
     {
         var comparison = type switch
         {
-            SchemaPageFieldType.Integer => ((int) columnData).CompareTo((int) filterPredicateValue),
-            SchemaPageFieldType.Boolean => ((bool) columnData).CompareTo((bool) filterPredicateValue),
-            SchemaPageFieldType.Long => ((long) columnData).CompareTo((long) filterPredicateValue),
-            SchemaPageFieldType.String => StringComparer.Ordinal.Compare(
+            SchemaFieldType.Integer => ((int) columnData).CompareTo((int) filterPredicateValue),
+            SchemaFieldType.Boolean => ((bool) columnData).CompareTo((bool) filterPredicateValue),
+            SchemaFieldType.Long => ((long) columnData).CompareTo((long) filterPredicateValue),
+            SchemaFieldType.String => StringComparer.Ordinal.Compare(
                 (string) columnData,
                 (string) filterPredicateValue),
             _ => throw new InvalidDataException($"Unknown schema field type: {type}.")
@@ -184,27 +179,27 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
         };
     }
 
-    private object GetData(SchemaPage schemaPage, Memory<byte> dataRow, string column)
+    private object GetData(Schema schema, Memory<byte> dataRow, string column)
     {
-        // todo: GetData evaluates schemaPage.Fields and performs a linear name search for every field of every row.
-        // Resolve the requested SchemaPageField objects once before scanning.
-        var schemaColumn = schemaPage.Fields.First(x => x.Name == column);
+        // todo: GetData evaluates schema.Fields and performs a linear name search for every field of every row.
+        // Resolve the requested Field objects once before scanning.
+        var schemaColumn = schema.Fields.First(x => x.Name == column);
 
         var data = dataRow.Slice(schemaColumn.Offset, schemaColumn.Length).Span;
 
         return schemaColumn.Type switch
         {
-            SchemaPageFieldType.Integer => BinaryPrimitives.ReadInt32LittleEndian(data),
-            SchemaPageFieldType.Boolean => BitConverter.ToBoolean(data),
-            SchemaPageFieldType.Long => BinaryPrimitives.ReadInt64LittleEndian(data),
-            SchemaPageFieldType.String => Encoding.UTF8.GetString(data).TrimEnd('\0'),
+            SchemaFieldType.Integer => BinaryPrimitives.ReadInt32LittleEndian(data),
+            SchemaFieldType.Boolean => BitConverter.ToBoolean(data),
+            SchemaFieldType.Long => BinaryPrimitives.ReadInt64LittleEndian(data),
+            SchemaFieldType.String => Encoding.UTF8.GetString(data).TrimEnd('\0'),
             _ => throw new Exception("unknown type")
         };
     }
 
-    private ReadOnlyMemory<byte> ConvertDataToBytes(SchemaPage schemaPage, string[] columns, object[] valueSet)
+    private ReadOnlyMemory<byte> ConvertDataToBytes(Schema schema, string[] columns, object[] valueSet)
     {
-        var fields = schemaPage.Fields;
+        var fields = schema.Fields;
         var fieldsByName = fields.ToDictionary(field => field.Name, StringComparer.Ordinal);
         var rowData = new byte[fields.Sum(field => field.Length)];
 
@@ -215,16 +210,16 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
 
             switch (field.Type)
             {
-                case SchemaPageFieldType.Integer:
+                case SchemaFieldType.Integer:
                     BinaryPrimitives.WriteInt32LittleEndian(destination, (int) valueSet[i]);
                     break;
-                case SchemaPageFieldType.Boolean:
+                case SchemaFieldType.Boolean:
                     destination[0] = (bool) valueSet[i] ? (byte) 1 : (byte) 0;
                     break;
-                case SchemaPageFieldType.Long:
+                case SchemaFieldType.Long:
                     BinaryPrimitives.WriteInt64LittleEndian(destination, (long) valueSet[i]);
                     break;
-                case SchemaPageFieldType.String:
+                case SchemaFieldType.String:
                     Encoding.UTF8.GetBytes((string) valueSet[i], destination);
                     break;
                 default:
@@ -242,7 +237,7 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
     }
 
     private static bool TryValueSetValidation(
-        SchemaPage schemaPage,
+        Schema schema,
         string[] columns,
         object[] valueSet,
         out string errorMessage)
@@ -253,13 +248,13 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
             return false;
         }
 
-        var fieldsByName = schemaPage.Fields.ToDictionary(field => field.Name, StringComparer.Ordinal);
+        var fieldsByName = schema.Fields.ToDictionary(field => field.Name, StringComparer.Ordinal);
 
         for (var i = 0; i < columns.Length; i++)
         {
             if (!fieldsByName.TryGetValue(columns[i], out var field))
             {
-                errorMessage = $"Column '{columns[i]}' does not exist in schema '{schemaPage.Name}'.";
+                errorMessage = $"Column '{columns[i]}' does not exist in schema '{schema.Name}'.";
                 return false;
             }
 
@@ -272,10 +267,10 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
 
             var valueIsValid = field.Type switch
             {
-                SchemaPageFieldType.Integer => field.Length == sizeof(int) && value is int,
-                SchemaPageFieldType.Boolean => field.Length == sizeof(byte) && value is bool,
-                SchemaPageFieldType.Long => field.Length == sizeof(long) && value is long,
-                SchemaPageFieldType.String => value is string stringValue &&
+                SchemaFieldType.Integer => field.Length == sizeof(int) && value is int,
+                SchemaFieldType.Boolean => field.Length == sizeof(byte) && value is bool,
+                SchemaFieldType.Long => field.Length == sizeof(long) && value is long,
+                SchemaFieldType.String => value is string stringValue &&
                                               Encoding.UTF8.GetByteCount(stringValue) <= field.Length,
                 _ => false
             };

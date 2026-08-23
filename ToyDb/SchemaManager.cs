@@ -8,18 +8,31 @@ public class SchemaManager(PageBufferManager pageBufferManager)
 {
     private static readonly StringComparer NameComparer = StringComparer.Ordinal;
 
-    private readonly Dictionary<string, int> _schemaDirectory = LoadSchemaDirectory(pageBufferManager);
+    private readonly Dictionary<string, SchemaEntry> _schemaDirectory = LoadSchemaDirectory(pageBufferManager);
 
     public bool HasSchema(string schemaName) => _schemaDirectory.ContainsKey(schemaName);
 
-    public Task<SchemaPage> GetSchemaAsync(string schemaName)
+    public Schema GetSchema(string schemaName)
     {
-        if (!_schemaDirectory.TryGetValue(schemaName, out var schemaPageNumber))
+        if (!_schemaDirectory.TryGetValue(schemaName, out var schemaEntry))
         {
             throw new KeyNotFoundException($"Schema '{schemaName}' does not exist.");
         }
 
-        return pageBufferManager.ReadPageAsync<SchemaPage>(schemaPageNumber);
+        return schemaEntry.Schema;
+    }
+
+    public int GetFirstDataPageNumber(string schemaName) => GetSchemaEntry(schemaName).FirstDataPageNumber;
+
+    public int GetLastDataPageNumber(string schemaName) => GetSchemaEntry(schemaName).LastDataPageNumber;
+    
+    public async Task UpdateLastDataPageNumberAsync(string schemaName, int pageNumber)
+    {
+        var schemaEntry = GetSchemaEntry(schemaName);
+        var schemaPage = await pageBufferManager.ReadPageAsync<SchemaPage>(schemaEntry.SchemaPageNumber);
+
+        schemaPage.LastDataPageNumber  = pageNumber;
+        schemaEntry.LastDataPageNumber = pageNumber;
     }
 
     public async Task AddSchemaAsync(Schema schema)
@@ -71,12 +84,16 @@ public class SchemaManager(PageBufferManager pageBufferManager)
         schemaPage.FirstDataPageNumber = newDataPageNumber;
         schemaPage.LastDataPageNumber  = newDataPageNumber;
 
-        _schemaDirectory.Add(schema.Name, schemaPageNumber);
+        _schemaDirectory.Add(schema.Name, new SchemaEntry(
+            GetSchemaFromPage(schemaPage),
+            schemaPageNumber,
+            newDataPageNumber,
+            newDataPageNumber));
     }
 
     public async Task RemoveSchemaAsync(string schemaName)
     {
-        if (!_schemaDirectory.TryGetValue(schemaName, out var schemaPageNumber))
+        if (!_schemaDirectory.TryGetValue(schemaName, out var schemaEntry))
         {
             throw new KeyNotFoundException($"Schema '{schemaName}' does not exist.");
         }
@@ -84,12 +101,12 @@ public class SchemaManager(PageBufferManager pageBufferManager)
         var headerPage = await pageBufferManager.ReadPageAsync<DatabaseHeaderPage>(0);
         var schemaDirectoryPage =
             await pageBufferManager.ReadPageAsync<SchemaDirectoryPage>(headerPage.SchemaDirectoryPageNumber);
-        var directoryEntry = Array.IndexOf(schemaDirectoryPage.SchemaPageNumbers, schemaPageNumber);
+        var directoryEntry = Array.IndexOf(schemaDirectoryPage.SchemaPageNumbers, schemaEntry.SchemaPageNumber);
 
         if (directoryEntry < 0)
         {
             throw new InvalidDataException(
-                $"Schema '{schemaName}' points to page {schemaPageNumber}, but that page is missing from the schema directory.");
+                $"Schema '{schemaName}' points to page {schemaEntry.SchemaPageNumber}, but that page is missing from the schema directory.");
         }
 
         schemaDirectoryPage.ClearSchemaDirectoryEntry(directoryEntry);
@@ -128,6 +145,37 @@ public class SchemaManager(PageBufferManager pageBufferManager)
         return true;
     }
 
+    // Validate that columns provided match what's available in schema
+    // Data will later be validated row by row
+    // todo: split for inserts vs selects 
+    public bool ValidateColumnsAgainstSchema(Schema schema, string[] columns)
+    {
+        var schemaColumns = schema.Fields
+            .Select(field => field.Name)
+            .ToHashSet(NameComparer);
+
+        return columns.All(schemaColumns.Contains);
+    }
+
+    public bool ValidateFilterAgainstSchema(Schema schema, QueryFilter[]? filter)
+    {
+        if (filter is null) return true;
+
+        var fieldsByName = schema.Fields.ToDictionary(field => field.Name, NameComparer);
+
+        foreach (var filterPredicate in filter)
+        {
+            if (!fieldsByName.TryGetValue(filterPredicate.Column, out var field) ||
+                !FilterValueMatchesFieldType(field.Type, filterPredicate.Value) ||
+                !FilterOperatorIsSupported(field.Type, filterPredicate.Operator))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static Schema GetSchemaFromPage(SchemaPage schemaPage)
     {
         var schema = new Schema(schemaPage.Name);
@@ -150,18 +198,6 @@ public class SchemaManager(PageBufferManager pageBufferManager)
         return schema;
     }
 
-    // Validate that columns provided match what's available in schema
-    // Data will later be validated row by row
-    // todo: split for inserts vs selects 
-    public bool ValidateColumnsAgainstSchema(SchemaPage schema, string[] columns)
-    {
-        var schemaColumns = schema.Fields
-            .Select(field => field.Name)
-            .ToHashSet(NameComparer);
-
-        return columns.All(schemaColumns.Contains);
-    }
-
     private static bool ValueMatchesField(Field field, object value)
     {
         return field.Type switch
@@ -175,9 +211,9 @@ public class SchemaManager(PageBufferManager pageBufferManager)
         };
     }
 
-    private static Dictionary<string, int> LoadSchemaDirectory(PageBufferManager pageBufferManager)
+    private static Dictionary<string, SchemaEntry> LoadSchemaDirectory(PageBufferManager pageBufferManager)
     {
-        var schemas = new Dictionary<string, int>(NameComparer);
+        var schemas = new Dictionary<string, SchemaEntry>(NameComparer);
         var headerPage = pageBufferManager.ReadPageAsync<DatabaseHeaderPage>(0).GetAwaiter().GetResult();
         var schemaDirectoryPage = pageBufferManager
             .ReadPageAsync<SchemaDirectoryPage>(headerPage.SchemaDirectoryPageNumber)
@@ -190,7 +226,11 @@ public class SchemaManager(PageBufferManager pageBufferManager)
                 .GetAwaiter()
                 .GetResult();
 
-            if (!schemas.TryAdd(schemaPage.Name, schemaPageNumber))
+            if (!schemas.TryAdd(schemaPage.Name, new SchemaEntry(
+                    GetSchemaFromPage(schemaPage),
+                    schemaPageNumber,
+                    schemaPage.FirstDataPageNumber,
+                    schemaPage.LastDataPageNumber)))
             {
                 throw new InvalidDataException(
                     $"The schema directory contains duplicate schema name '{schemaPage.Name}'.");
@@ -200,42 +240,20 @@ public class SchemaManager(PageBufferManager pageBufferManager)
         return schemas;
     }
 
-    public bool ValidateFilterAgainstSchema(SchemaPage schemaPage, QueryFilter[]? filter)
-    {
-        if (filter is null)
-        {
-            return true;
-        }
-
-        var fieldsByName = schemaPage.Fields.ToDictionary(field => field.Name, NameComparer);
-
-        foreach (var filterPredicate in filter)
-        {
-            if (!fieldsByName.TryGetValue(filterPredicate.Column, out var field) ||
-                !FilterValueMatchesFieldType(field.Type, filterPredicate.Value) ||
-                !FilterOperatorIsSupported(field.Type, filterPredicate.Operator))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private static bool FilterValueMatchesFieldType(SchemaPageFieldType fieldType, object value)
+    private static bool FilterValueMatchesFieldType(SchemaFieldType fieldType, object value)
     {
         return fieldType switch
         {
-            SchemaPageFieldType.Integer => value is int,
-            SchemaPageFieldType.Boolean => value is bool,
-            SchemaPageFieldType.Long => value is long,
-            SchemaPageFieldType.String => value is string,
+            SchemaFieldType.Integer => value is int,
+            SchemaFieldType.Boolean => value is bool,
+            SchemaFieldType.Long => value is long,
+            SchemaFieldType.String => value is string,
             _ => false
         };
     }
 
     private static bool FilterOperatorIsSupported(
-        SchemaPageFieldType fieldType,
+        SchemaFieldType fieldType,
         QueryFilterOperator filterOperator)
     {
         if (!Enum.IsDefined(filterOperator))
@@ -243,7 +261,29 @@ public class SchemaManager(PageBufferManager pageBufferManager)
             return false;
         }
 
-        return fieldType != SchemaPageFieldType.Boolean ||
+        return fieldType != SchemaFieldType.Boolean ||
                filterOperator is QueryFilterOperator.EqualTo or QueryFilterOperator.NotEqualTo;
+    }
+
+    private SchemaEntry GetSchemaEntry(string schemaName)
+    {
+        if (!_schemaDirectory.TryGetValue(schemaName, out var schemaEntry))
+        {
+            throw new KeyNotFoundException($"Schema '{schemaName}' does not exist.");
+        }
+
+        return schemaEntry;
+    }
+
+    private sealed class SchemaEntry(
+        Schema schema,
+        int schemaPageNumber,
+        int firstDataPageNumber,
+        int lastDataPageNumber)
+    {
+        public Schema Schema { get; } = schema;
+        public int SchemaPageNumber { get; } = schemaPageNumber;
+        public int FirstDataPageNumber { get; } = firstDataPageNumber;
+        public int LastDataPageNumber { get; set; } = lastDataPageNumber;
     }
 }

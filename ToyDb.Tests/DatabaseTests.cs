@@ -124,4 +124,40 @@ public class DatabaseTests
             File.Delete(databasePath);
         }
     }
+
+    [Test]
+    public async Task CanContinueInsertingAfterDataPageOverflowAndReopen()
+    {
+        var databasePath = Path.Combine(TestContext.CurrentContext.WorkDirectory, $"{Guid.NewGuid()}.toydb");
+
+        try
+        {
+            await Database.InitializeAsync(databasePath);
+
+            using (var database = Database.Open(databasePath))
+            {
+                await database.AddSchemaAsync(new Schema("TestSchema")
+                    .AddField("field1", SchemaFieldType.String, 255));
+
+                var values = Enumerable.Range(0, 20)
+                    .Select(value => new object[] { value.ToString() })
+                    .ToArray();
+
+                await database.InsertAsync("TestSchema", ["field1"], values);
+                await database.InsertAsync("TestSchema", ["field1"], [["same session"]]);
+            }
+
+            using (var database = Database.Open(databasePath))
+            {
+                await database.InsertAsync("TestSchema", ["field1"], [["reopened"]]);
+
+                var results = await database.SelectAsync("TestSchema", ["field1"]).ToListAsync();
+                Assert.That(results, Has.Count.EqualTo(22));
+            }
+        }
+        finally
+        {
+            File.Delete(databasePath);
+        }
+    }
 }
