@@ -55,7 +55,7 @@ public class PageBufferManager : IDisposable
 
     public TPage AllocatePage<TPage>(int pageNumber) where TPage : Page, IPageFactory<TPage>
     {
-        _logger.Log(LogLevel.Information, $"Allocating page {pageNumber}");
+        _logger.Log(LogLevel.Information, "Allocating page {PageNumber}", pageNumber);
         if (HasPage(pageNumber))
             throw new InvalidOperationException($"Page {pageNumber} already allocated");
 
