@@ -5,15 +5,16 @@ namespace ToyDb.Tests;
 public class EvictionPolicyTests
 {
     [Test]
-    public void EvictsMostRecentlyFreedPageFirst()
+    public void EvictsLeastRecentlyFreedPageFirst()
     {
         var policy = CreatePolicy(1, 2);
 
-        policy.FreePage(1);
-        policy.FreePage(2);
+        policy.MarkPageNotInUse(1);
+        Thread.Sleep(1);
+        policy.MarkPageNotInUse(2);
 
         Assert.That(policy.TryEvict(out var frameNumber), Is.True);
-        Assert.That(frameNumber, Is.EqualTo(2));
+        Assert.That(frameNumber, Is.EqualTo(1));
     }
 
     [Test]
@@ -21,9 +22,9 @@ public class EvictionPolicyTests
     {
         var policy = CreatePolicy(1, 2);
 
-        policy.FreePage(1);
-        policy.FreePage(2);
-        policy.UsePage(2);
+        policy.MarkPageNotInUse(1);
+        policy.MarkPageNotInUse(2);
+        policy.MarkPageInUse(2);
 
         Assert.That(policy.TryEvict(out var frameNumber), Is.True);
         Assert.That(frameNumber, Is.EqualTo(1));
@@ -35,21 +36,21 @@ public class EvictionPolicyTests
     {
         var policy = CreatePolicy(1);
 
-        policy.FreePage(1);
-        policy.FreePage(1);
+        policy.MarkPageNotInUse(1);
+        policy.MarkPageNotInUse(1);
 
         Assert.That(policy.TryEvict(out var frameNumber), Is.True);
         Assert.That(frameNumber, Is.EqualTo(1));
         Assert.That(policy.TryEvict(out _), Is.False);
     }
 
-    private static LifoEvictionPolicy CreatePolicy(params int[] pageNumbers)
+    private static LruEvictionPolicy CreatePolicy(params int[] pageNumbers)
     {
         var pageBufferTable = pageNumbers.ToDictionary(
             pageNumber => pageNumber,
             pageNumber => new BufferTableEntry(pageNumber, Dirty: false, PinCount: 0));
 
-        return new LifoEvictionPolicy(
+        return new LruEvictionPolicy(
             new ReadOnlyDictionary<int, BufferTableEntry>(pageBufferTable));
     }
 }

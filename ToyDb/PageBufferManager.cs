@@ -26,7 +26,7 @@ public class PageBufferManager : IDisposable
         _logger        = Logging.LoggerFactory.CreateLogger<FileIoManager>();
         _bufferPool    = new byte[Constants.PageSizeBytes * frameCount];
         _freeFrames    = new Stack<int>(Enumerable.Range(0, frameCount).Reverse());
-        _evictionPolicy = new LifoEvictionPolicy(
+        _evictionPolicy = new LruEvictionPolicy(
             new ReadOnlyDictionary<int, BufferTableEntry>(_pageBufferTable));
     }
 
@@ -37,7 +37,7 @@ public class PageBufferManager : IDisposable
         if (_pageBufferTable.TryGetValue(pageNumber, out var frame))
         {
             _pageBufferTable[pageNumber] = frame with {PinCount = frame.PinCount + 1};
-            _evictionPolicy.UsePage(pageNumber);
+            _evictionPolicy.MarkPageInUse(pageNumber);
             return TPage.CreatePage(GetBufferFrame(frame.FrameNumber));
         }
 
@@ -48,7 +48,7 @@ public class PageBufferManager : IDisposable
         await _fileIoManager.ReadAsync(pageNumber * Constants.PageSizeBytes, bufferSlice);
 
         _pageBufferTable.Add(pageNumber, BufferTableEntry.Create(frameNumber));
-        _evictionPolicy.UsePage(pageNumber);
+        _evictionPolicy.MarkPageInUse(pageNumber);
 
         return TPage.CreatePage(bufferSlice);
     }
@@ -114,9 +114,9 @@ public class PageBufferManager : IDisposable
         var newPinCount = frame.PinCount > 0 ? frame.PinCount - 1 : 0;
         _pageBufferTable[pageNumber] = frame with {PinCount = newPinCount};
 
-        if (frame.PinCount == 1)
+        if (frame.PinCount == 1) // Page no longer has any more pins, can be freed up
         {
-            _evictionPolicy.FreePage(pageNumber);
+            _evictionPolicy.MarkPageNotInUse(pageNumber);
         }
     }
 
