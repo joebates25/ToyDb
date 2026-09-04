@@ -17,6 +17,7 @@ public class PageBufferManager : IDisposable
     private readonly Dictionary<PageNumber, BufferTableEntry> _pageBufferTable = new();
     private readonly Stack<int> _freeFrames;
     private readonly IEvictionPolicy _evictionPolicy;
+    private readonly HashSet<int> _dirtyPages = new();
 
     public PageBufferManager(FileIoManager fileIoManager, PageBufferConfig? pageBufferConfig)
     {
@@ -63,13 +64,9 @@ public class PageBufferManager : IDisposable
             _bufferPool.Slice(firstFreeFrameNumber * Constants.PageSizeBytes, Constants.PageSizeBytes);
         bufferSlice.Span.Fill(0);
         _pageBufferTable.Add(pageNumber, BufferTableEntry.CreateDirty(firstFreeFrameNumber));
+        _dirtyPages.Add(pageNumber);
 
         return TPage.InitializePage(bufferSlice);
-    }
-
-    public void DirtyPage(int pageNumber)
-    {
-        // Do NOT call MarkPageNotInUse because dirty pages shouldn't be evicted. Write them to disk instead.
     }
 
     // todo: page probably needs page number at this point
@@ -90,14 +87,15 @@ public class PageBufferManager : IDisposable
     public async Task FlushAsync()
     {
         _logger.Log(LogLevel.Information, "Flushing page buffers");
-        foreach (var pageBufferTableEntry in _pageBufferTable)
+        foreach (var dirtyPage in _dirtyPages)
         {
-            var frame = pageBufferTableEntry.Value;
+            var frame = _pageBufferTable[dirtyPage];
             var pageMemory =
                 (ReadOnlyMemory<byte>) GetBufferFrame(frame.FrameNumber);
-            await _fileIoManager.WriteAsync(pageBufferTableEntry.Key * Constants.PageSizeBytes, pageMemory);
+            await _fileIoManager.WriteAsync(dirtyPage * Constants.PageSizeBytes, pageMemory);
         }
-
+        
+        _dirtyPages.Clear();
         await _fileIoManager.FlushAsync();
     }
 
@@ -107,6 +105,8 @@ public class PageBufferManager : IDisposable
         _fileIoManager.Dispose();
     }
 
+    // should be something like TryGetFreeFrame because it will either return a free frame or evict a page to free up a frame.
+    // If no frames are available, it will throw an exception.
     private FrameNumber GetFirstFreeFrameNumber()
     {
         if (_freeFrames.Count > 0)
@@ -135,6 +135,15 @@ public class PageBufferManager : IDisposable
 
     private Memory<byte> GetBufferFrame(int frameNumber) =>
         _bufferPool.Slice(frameNumber * Constants.PageSizeBytes, Constants.PageSizeBytes);
+
+    public void MarkPageDirty(int pageNumber)
+    {
+        if (_pageBufferTable.TryGetValue(pageNumber, out var frame))
+        {
+            _pageBufferTable[pageNumber] = frame with {Dirty = true};
+            _dirtyPages.Add(pageNumber);
+        }
+    }
 }
 
 public record BufferTableEntry(int FrameNumber, bool Dirty, int PinCount)

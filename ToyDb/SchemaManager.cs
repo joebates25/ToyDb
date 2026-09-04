@@ -33,6 +33,8 @@ public class SchemaManager(PageBufferManager pageBufferManager)
 
         schemaPage.LastDataPageNumber  = pageNumber;
         schemaEntry.LastDataPageNumber = pageNumber;
+        
+        pageBufferManager.MarkPageDirty(schemaEntry.SchemaPageNumber);
     }
 
     public async Task AddSchemaAsync(Schema schema)
