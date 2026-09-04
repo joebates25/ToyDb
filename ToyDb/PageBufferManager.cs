@@ -42,7 +42,7 @@ public class PageBufferManager : IDisposable
         }
 
         // todo: if anything fails, frame stays unfree. need to fix
-        var frameNumber = GetFirstFreeFrameNumber();
+        var frameNumber = FreeFrame();
         var bufferSlice = GetBufferFrame(frameNumber);
         bufferSlice.Span.Clear();
         await _fileIoManager.ReadAsync(pageNumber * Constants.PageSizeBytes, bufferSlice);
@@ -59,7 +59,7 @@ public class PageBufferManager : IDisposable
         if (HasPage(pageNumber))
             throw new InvalidOperationException($"Page {pageNumber} already allocated");
 
-        var firstFreeFrameNumber = GetFirstFreeFrameNumber();
+        var firstFreeFrameNumber = FreeFrame();
         var bufferSlice =
             _bufferPool.Slice(firstFreeFrameNumber * Constants.PageSizeBytes, Constants.PageSizeBytes);
         bufferSlice.Span.Fill(0);
@@ -90,11 +90,13 @@ public class PageBufferManager : IDisposable
         foreach (var dirtyPage in _dirtyPages)
         {
             var frame = _pageBufferTable[dirtyPage];
+            if (frame.InUse) continue;
+            
             var pageMemory =
                 (ReadOnlyMemory<byte>) GetBufferFrame(frame.FrameNumber);
             await _fileIoManager.WriteAsync(dirtyPage * Constants.PageSizeBytes, pageMemory);
         }
-        
+
         _dirtyPages.Clear();
         await _fileIoManager.FlushAsync();
     }
@@ -105,18 +107,26 @@ public class PageBufferManager : IDisposable
         _fileIoManager.Dispose();
     }
 
-    // should be something like TryGetFreeFrame because it will either return a free frame or evict a page to free up a frame.
-    // If no frames are available, it will throw an exception.
-    private FrameNumber GetFirstFreeFrameNumber()
+    private FrameNumber FreeFrame()
     {
+        // todo: perhaps eventually there's a timeout/retry mechanism to wait for a frame to become available,
+        // but for now we will just throw an exception.
         if (_freeFrames.Count > 0)
             return _freeFrames.Pop();
 
         if (TryEvictPage(out var freeFrameNumber))
             return freeFrameNumber;
 
-        throw new NotImplementedException(
-            "todo: Need to handle case when all frames are in use and no more buffer space available");
+        if (_dirtyPages.Count > 0)
+        {
+            _logger.Log(LogLevel.Information, "Flushing dirty pages to free up buffer space");
+            FlushAsync().GetAwaiter().GetResult();
+            if (TryEvictPage(out freeFrameNumber))
+                return freeFrameNumber;
+        }
+
+        throw new OutOfMemoryException(
+            "All buffer frames are in use and no pages can be evicted. Consider increasing the buffer size.");
     }
 
     private bool TryEvictPage(out int evictFrame)
@@ -151,6 +161,8 @@ public record BufferTableEntry(int FrameNumber, bool Dirty, int PinCount)
     public static BufferTableEntry Create(int frameNumber) => new(frameNumber, false, 1);
 
     public static BufferTableEntry CreateDirty(int frameNumber) => new(frameNumber, true, 1);
+
+    public bool InUse => PinCount > 0;
 }
 
 public record PageBufferConfig(int FrameCount);

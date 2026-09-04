@@ -17,8 +17,9 @@ public class LruEvictionPolicy(ReadOnlyDictionary<int, BufferTableEntry> pageBuf
     {
         while (_evictionQueue.TryDequeue(out var pageNumber, out _))
         {
-            if (!pageBufferTable.TryGetValue(pageNumber, out var entry) || entry.PinCount != 0 ||
-                entry.Dirty) // todo: but need to write out dirty pages at some point
+            if (!pageBufferTable.TryGetValue(pageNumber, out var entry) 
+                || entry.InUse 
+                || entry.Dirty) 
                 continue;
 
             frameEvicted = entry.FrameNumber;
