@@ -49,13 +49,14 @@ public class SchemaManager(PageBufferManager pageBufferManager)
         var headerPage = headerPageLease.Page;
 
         // get schema directory page
-        var schemaDirectoryPageLease =
+        using var schemaDirectoryPageLease =
             await pageBufferManager.LeasePageAsync<SchemaDirectoryPage>(headerPage.SchemaDirectoryPageNumber);
         var schemaDirectoryPage = schemaDirectoryPageLease.Page;
 
         var schemaPageNumber = headerPage.PageCount++;
         // allocate a new schema page from page buffer
-        var schemaPage = pageBufferManager.AllocatePage<SchemaPage>(schemaPageNumber);
+        using var schemaPageLease = pageBufferManager.AllocatePageLease<SchemaPage>(schemaPageNumber);
+        var schemaPage = schemaPageLease.Page;
 
         // todo: validate name as valid
         // add info schema object to page
@@ -85,7 +86,8 @@ public class SchemaManager(PageBufferManager pageBufferManager)
         schemaDirectoryPage.InsertSchemaDirectoryEntry(schemaPageNumber);
 
         var newDataPageNumber = headerPage.PageCount++;
-        pageBufferManager.AllocatePage<DataPage>(newDataPageNumber);
+        using var newPageLease = pageBufferManager.AllocatePageLease<DataPage>(newDataPageNumber);
+        var newDataPage = newPageLease.Page;
         schemaPage.FirstDataPageNumber = newDataPageNumber;
         schemaPage.LastDataPageNumber  = newDataPageNumber;
 
@@ -111,7 +113,7 @@ public class SchemaManager(PageBufferManager pageBufferManager)
         using var headerPageLease = await pageBufferManager.LeasePageAsync<DatabaseHeaderPage>(0);
         var headerPage = headerPageLease.Page;
         using var schemaDirectoryPageLease =
-            await pageBufferManager.LeasePageAsync<SchemaDirectoryPage>(headerPageLease.Page.SchemaDirectoryPageNumber);
+            pageBufferManager.AllocatePageLease<SchemaDirectoryPage>(headerPageLease.Page.SchemaDirectoryPageNumber);
         var schemaDirectoryPage = schemaDirectoryPageLease.Page;
         var directoryEntry = Array.IndexOf(schemaDirectoryPage.SchemaPageNumbers, schemaEntry.SchemaPageNumber);
 

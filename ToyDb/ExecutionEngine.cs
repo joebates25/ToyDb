@@ -19,7 +19,7 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
             throw new Exception("Invalid columns provided");
         }
 
-        var insertPageLease = await pageBufferManager.LeasePageAsync<DataPage>(
+        using var insertPageLease = await pageBufferManager.LeasePageAsync<DataPage>(
             schemaManager.GetLastDataPageNumber(tableName));
         var insertPage = insertPageLease.Page;
         foreach (var valueSet in valueSets)
@@ -35,7 +35,8 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
                 using var headerPageLease = await pageBufferManager.LeasePageAsync<DatabaseHeaderPage>(0);
                 var headerPage = headerPageLease.Page;
                 var insertedPageNumber = ++headerPage.PageCount;
-                var newDataPage = pageBufferManager.AllocatePage<DataPage>(insertedPageNumber);
+                using var newDataPageLease = pageBufferManager.AllocatePageLease<DataPage>(insertedPageNumber);
+                var newDataPage = newDataPageLease.Page;
                 insertPage.OverFlowPageNumber = insertedPageNumber;
                 insertPage                    = newDataPage;
                 await schemaManager.UpdateLastDataPageNumberAsync(tableName, insertedPageNumber);

@@ -61,16 +61,22 @@ public class Database : IDisposable
         using var pageBuffer = new PageBufferManager(new FileIoManager(filePath),
             pageBufferConfig: new PageBufferConfig(FrameCount: 20)); // only need a small buffer to init db
 
-        var newHeaderPage = pageBuffer
-            .AllocatePage<DatabaseHeaderPage>(0);
-        newHeaderPage.Version = EngineVersion;
+        using (var newHeaderPageLease = pageBuffer
+                   .AllocatePageLease<DatabaseHeaderPage>(0))
+        {
+            var newHeaderPage = newHeaderPageLease.Page;
+            newHeaderPage.Version = EngineVersion;
+            using (
+                var schemaDirectoryPageLease = pageBuffer.AllocatePageLease<SchemaDirectoryPage>(SchemaDirectoryPageNumber))
+            {
+                newHeaderPage.SchemaDirectoryPageNumber = SchemaDirectoryPageNumber;
+                newHeaderPage.PageCount                 = 2;
+            }
+        }
 
-        pageBuffer.AllocatePage<SchemaDirectoryPage>(SchemaDirectoryPageNumber);
-        newHeaderPage.SchemaDirectoryPageNumber = SchemaDirectoryPageNumber;
-        newHeaderPage.PageCount                 = 2;
-        
-        pageBuffer.FreePage(0);
-        pageBuffer.FreePage(1);
+
+        pageBuffer.MarkPageDirty(0);
+        pageBuffer.MarkPageDirty(1);
 
         await pageBuffer.FlushAsync();
     }

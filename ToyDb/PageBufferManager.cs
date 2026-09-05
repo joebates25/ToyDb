@@ -30,28 +30,7 @@ public class PageBufferManager : IDisposable
         _evictionPolicy = new LruEvictionPolicy(
             new ReadOnlyDictionary<int, BufferTableEntry>(_pageBufferTable));
     }
-
-    public async Task<TPage> ReadPageAsync1<TPage>(int pageNumber) where TPage : Page, IPageFactory<TPage>
-    {
-        _logger.Log(LogLevel.Information, $"Reading page {pageNumber}");
-        if (_pageBufferTable.TryGetValue(pageNumber, out var frame))
-        {
-            _pageBufferTable[pageNumber] = frame with {PinCount = frame.PinCount + 1};
-            _evictionPolicy.MarkPageInUse(pageNumber);
-            return TPage.CreatePage(GetBufferFrame(frame.FrameNumber));
-        }
-
-        // todo: if anything fails, frame stays unfree. need to fix
-        var frameNumber = FreeFrame();
-        var bufferSlice = GetBufferFrame(frameNumber);
-        bufferSlice.Span.Clear();
-        await _fileIoManager.ReadAsync(pageNumber * Constants.PageSizeBytes, bufferSlice);
-
-        _pageBufferTable.Add(pageNumber, BufferTableEntry.Create(frameNumber));
-        _evictionPolicy.MarkPageInUse(pageNumber);
-
-        return TPage.CreatePage(bufferSlice);
-    }
+    
     
     public async Task<PageLease<TPage>> LeasePageAsync<TPage>(int pageNumber) where TPage : Page, IPageFactory<TPage>
     {
@@ -67,6 +46,7 @@ public class PageBufferManager : IDisposable
         var frameNumber = FreeFrame();
         var bufferSlice = GetBufferFrame(frameNumber);
         bufferSlice.Span.Clear();
+        _logger.Log(LogLevel.Information, "Leasing page {PageNumber}", pageNumber);
         await _fileIoManager.ReadAsync(pageNumber * Constants.PageSizeBytes, bufferSlice);
 
         _pageBufferTable.Add(pageNumber, BufferTableEntry.Create(frameNumber));
@@ -75,7 +55,7 @@ public class PageBufferManager : IDisposable
         return new PageLease<TPage>(TPage.CreatePage(bufferSlice), FreePage, pageNumber);
     }
 
-    public TPage AllocatePage<TPage>(int pageNumber) where TPage : Page, IPageFactory<TPage>
+    public PageLease<TPage> AllocatePageLease<TPage>(int pageNumber) where TPage : Page, IPageFactory<TPage>
     {
         _logger.Log(LogLevel.Information, "Allocating page {PageNumber}", pageNumber);
         if (HasPage(pageNumber))
@@ -88,7 +68,7 @@ public class PageBufferManager : IDisposable
         _pageBufferTable.Add(pageNumber, BufferTableEntry.CreateDirty(firstFreeFrameNumber));
         _dirtyPages.Add(pageNumber);
 
-        return TPage.InitializePage(bufferSlice);
+        return new PageLease<TPage>(TPage.InitializePage(bufferSlice), FreePage, pageNumber);
     }
 
     // todo: page probably needs page number at this point
@@ -116,6 +96,7 @@ public class PageBufferManager : IDisposable
             
             var pageMemory =
                 (ReadOnlyMemory<byte>) GetBufferFrame(dirtyFrame.FrameNumber);
+            _logger.Log(LogLevel.Information, "Flushing dirty page {PageNumber} to disk", dirtyPage);
             await _fileIoManager.WriteAsync(dirtyPage * Constants.PageSizeBytes, pageMemory);
         }
 
