@@ -66,14 +66,12 @@ public class Database : IDisposable
         {
             var newHeaderPage = newHeaderPageLease.Page;
             newHeaderPage.Version = EngineVersion;
-            using (
-                var schemaDirectoryPageLease = pageBuffer.AllocatePageLease<SchemaDirectoryPage>(SchemaDirectoryPageNumber))
+            using (pageBuffer.AllocatePageLease<SchemaDirectoryPage>(SchemaDirectoryPageNumber))
             {
                 newHeaderPage.SchemaDirectoryPageNumber = SchemaDirectoryPageNumber;
                 newHeaderPage.PageCount                 = 2;
             }
         }
-
 
         pageBuffer.MarkPageDirty(0);
         pageBuffer.MarkPageDirty(1);

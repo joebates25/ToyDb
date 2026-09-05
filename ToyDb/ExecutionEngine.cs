@@ -13,6 +13,7 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
         {
             throw new Exception($"Table {tableName} does not exist.");
         }
+
         var schema = schemaManager.GetSchema(tableName);
         if (!schemaManager.ValidateColumnsAgainstSchema(schema, columns))
         {
@@ -36,9 +37,8 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
                 var headerPage = headerPageLease.Page;
                 var insertedPageNumber = ++headerPage.PageCount;
                 using var newDataPageLease = pageBufferManager.AllocatePageLease<DataPage>(insertedPageNumber);
-                var newDataPage = newDataPageLease.Page;
                 insertPage.OverFlowPageNumber = insertedPageNumber;
-                insertPage                    = newDataPage;
+                insertPage                    = newDataPageLease.Page;
                 await schemaManager.UpdateLastDataPageNumberAsync(tableName, insertedPageNumber);
             }
 
@@ -59,7 +59,6 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
             throw new Exception($"Table {tableName} does not exist.");
         }
 
-        
         var schema = schemaManager.GetSchema(tableName);
         if (!schemaManager.ValidateColumnsAgainstSchema(schema, columns))
         {
@@ -89,7 +88,6 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
                     yield return columns.Select(column => GetData(schema, dataRow, column)).ToArray();
                 }
             }
-
         } while (dataPageNumber != -1);
     }
 
@@ -275,7 +273,7 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
                 SchemaFieldType.Boolean => field.Length == sizeof(byte) && value is bool,
                 SchemaFieldType.Long => field.Length == sizeof(long) && value is long,
                 SchemaFieldType.String => value is string stringValue &&
-                                              Encoding.UTF8.GetByteCount(stringValue) <= field.Length,
+                                          Encoding.UTF8.GetByteCount(stringValue) <= field.Length,
                 _ => false
             };
 

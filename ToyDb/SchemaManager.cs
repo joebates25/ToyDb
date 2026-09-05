@@ -87,7 +87,6 @@ public class SchemaManager(PageBufferManager pageBufferManager)
 
         var newDataPageNumber = headerPage.PageCount++;
         using var newPageLease = pageBufferManager.AllocatePageLease<DataPage>(newDataPageNumber);
-        var newDataPage = newPageLease.Page;
         schemaPage.FirstDataPageNumber = newDataPageNumber;
         schemaPage.LastDataPageNumber  = newDataPageNumber;
 

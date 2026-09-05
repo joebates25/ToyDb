@@ -30,8 +30,7 @@ public class PageBufferManager : IDisposable
         _evictionPolicy = new LruEvictionPolicy(
             new ReadOnlyDictionary<int, BufferTableEntry>(_pageBufferTable));
     }
-    
-    
+
     public async Task<PageLease<TPage>> LeasePageAsync<TPage>(int pageNumber) where TPage : Page, IPageFactory<TPage>
     {
         _logger.Log(LogLevel.Information, $"Reading page {pageNumber}");
@@ -80,10 +79,7 @@ public class PageBufferManager : IDisposable
         var newPinCount = frame.PinCount > 0 ? frame.PinCount - 1 : 0;
         _pageBufferTable[pageNumber] = frame with {PinCount = newPinCount};
 
-        if (frame.PinCount == 1) // Page no longer has any more pins, can be freed up
-        {
-            _evictionPolicy.MarkPageNotInUse(pageNumber);
-        }
+        if (newPinCount == 0) _evictionPolicy.MarkPageNotInUse(pageNumber);
     }
 
     public async Task FlushAsync()
@@ -93,7 +89,7 @@ public class PageBufferManager : IDisposable
         {
             var dirtyFrame = _pageBufferTable[dirtyPage];
             if (dirtyFrame.InUse) continue;
-            
+
             var pageMemory =
                 (ReadOnlyMemory<byte>) GetBufferFrame(dirtyFrame.FrameNumber);
             _logger.Log(LogLevel.Information, "Flushing dirty page {PageNumber} to disk", dirtyPage);
