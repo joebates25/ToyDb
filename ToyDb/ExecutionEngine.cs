@@ -19,8 +19,9 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
             throw new Exception("Invalid columns provided");
         }
 
-        var insertPage = await pageBufferManager.ReadPageAsync<DataPage>(
+        var insertPageLease = await pageBufferManager.LeasePageAsync<DataPage>(
             schemaManager.GetLastDataPageNumber(tableName));
+        var insertPage = insertPageLease.Page;
         foreach (var valueSet in valueSets)
         {
             if (!TryValueSetValidation(schema, columns, valueSet, out var errorMessage))
@@ -31,7 +32,8 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
             var rowData = ConvertDataToBytes(schema, columns, valueSet);
             if (!HasFreeSpaceForInsert(insertPage, rowData.Length))
             {
-                var headerPage = await pageBufferManager.ReadPageAsync<DatabaseHeaderPage>(0);
+                using var headerPageLease = await pageBufferManager.LeasePageAsync<DatabaseHeaderPage>(0);
+                var headerPage = headerPageLease.Page;
                 var insertedPageNumber = ++headerPage.PageCount;
                 var newDataPage = pageBufferManager.AllocatePage<DataPage>(insertedPageNumber);
                 insertPage.OverFlowPageNumber = insertedPageNumber;
@@ -71,7 +73,8 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
         var dataPageNumber = schemaManager.GetFirstDataPageNumber(tableName);
         do
         {
-            var dataPage = await pageBufferManager.ReadPageAsync<DataPage>(dataPageNumber);
+            using var dataPageLease = (await pageBufferManager.LeasePageAsync<DataPage>(dataPageNumber));
+            var dataPage = dataPageLease.Page;
             dataPageNumber = dataPage.OverFlowPageNumber;
 
             foreach (var slot in dataPage.EnumerateSlots())
@@ -86,7 +89,6 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
                 }
             }
 
-            pageBufferManager.FreePage(dataPageNumber);
         } while (dataPageNumber != -1);
     }
 
@@ -110,7 +112,8 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
         var deleteCount = 0;
         do
         {
-            var dataPage = await pageBufferManager.ReadPageAsync<DataPage>(dataPageNumber);
+            using var dataPageLease = await pageBufferManager.LeasePageAsync<DataPage>(dataPageNumber);
+            var dataPage = dataPageLease.Page;
             dataPageNumber = dataPage.OverFlowPageNumber;
 
             for (var slotNum = 0; slotNum < dataPage.SlotCount; slotNum++)

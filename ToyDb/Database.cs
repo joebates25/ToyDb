@@ -35,7 +35,8 @@ public class Database : IDisposable
         _pageBufferManager = new PageBufferManager(
             new FileIoManager(filePath),
             pageBufferConfig: new PageBufferConfig(FrameCount: 20));
-        var headerPage = _pageBufferManager.ReadPageAsync<DatabaseHeaderPage>(0).Result;
+        using var headerPageLease = _pageBufferManager.LeasePageAsync<DatabaseHeaderPage>(0).Result;
+        var headerPage = headerPageLease.Page;
         var welcomeValid = headerPage.WelcomeMessage == Constants.WelcomeMessage;
         if (!welcomeValid) throw new Exception("Invalid database format.");
 

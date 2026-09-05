@@ -31,7 +31,7 @@ public class PageBufferManager : IDisposable
             new ReadOnlyDictionary<int, BufferTableEntry>(_pageBufferTable));
     }
 
-    public async Task<TPage> ReadPageAsync<TPage>(int pageNumber) where TPage : Page, IPageFactory<TPage>
+    public async Task<TPage> ReadPageAsync1<TPage>(int pageNumber) where TPage : Page, IPageFactory<TPage>
     {
         _logger.Log(LogLevel.Information, $"Reading page {pageNumber}");
         if (_pageBufferTable.TryGetValue(pageNumber, out var frame))
@@ -51,6 +51,28 @@ public class PageBufferManager : IDisposable
         _evictionPolicy.MarkPageInUse(pageNumber);
 
         return TPage.CreatePage(bufferSlice);
+    }
+    
+    public async Task<PageLease<TPage>> LeasePageAsync<TPage>(int pageNumber) where TPage : Page, IPageFactory<TPage>
+    {
+        _logger.Log(LogLevel.Information, $"Reading page {pageNumber}");
+        if (_pageBufferTable.TryGetValue(pageNumber, out var frame))
+        {
+            _pageBufferTable[pageNumber] = frame with {PinCount = frame.PinCount + 1};
+            _evictionPolicy.MarkPageInUse(pageNumber);
+            return new PageLease<TPage>(TPage.CreatePage(GetBufferFrame(frame.FrameNumber)), FreePage, pageNumber);
+        }
+
+        // todo: if anything fails, frame stays unfree. need to fix
+        var frameNumber = FreeFrame();
+        var bufferSlice = GetBufferFrame(frameNumber);
+        bufferSlice.Span.Clear();
+        await _fileIoManager.ReadAsync(pageNumber * Constants.PageSizeBytes, bufferSlice);
+
+        _pageBufferTable.Add(pageNumber, BufferTableEntry.Create(frameNumber));
+        _evictionPolicy.MarkPageInUse(pageNumber);
+
+        return new PageLease<TPage>(TPage.CreatePage(bufferSlice), FreePage, pageNumber);
     }
 
     public TPage AllocatePage<TPage>(int pageNumber) where TPage : Page, IPageFactory<TPage>

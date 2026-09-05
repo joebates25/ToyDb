@@ -29,7 +29,8 @@ public class SchemaManager(PageBufferManager pageBufferManager)
     public async Task UpdateLastDataPageNumberAsync(string schemaName, int pageNumber)
     {
         var schemaEntry = GetSchemaEntry(schemaName);
-        var schemaPage = await pageBufferManager.ReadPageAsync<SchemaPage>(schemaEntry.SchemaPageNumber);
+        using var schemaPageLease = await pageBufferManager.LeasePageAsync<SchemaPage>(schemaEntry.SchemaPageNumber);
+        var schemaPage = schemaPageLease.Page;
 
         schemaPage.LastDataPageNumber  = pageNumber;
         schemaEntry.LastDataPageNumber = pageNumber;
@@ -44,11 +45,13 @@ public class SchemaManager(PageBufferManager pageBufferManager)
             throw new InvalidOperationException($"Schema '{schema.Name}' already exists.");
         }
 
-        var headerPage = await pageBufferManager.ReadPageAsync<DatabaseHeaderPage>(0);
+        using var headerPageLease = await pageBufferManager.LeasePageAsync<DatabaseHeaderPage>(0);
+        var headerPage = headerPageLease.Page;
 
         // get schema directory page
-        var schemaDirectoryPage =
-            await pageBufferManager.ReadPageAsync<SchemaDirectoryPage>(headerPage.SchemaDirectoryPageNumber);
+        var schemaDirectoryPageLease =
+            await pageBufferManager.LeasePageAsync<SchemaDirectoryPage>(headerPage.SchemaDirectoryPageNumber);
+        var schemaDirectoryPage = schemaDirectoryPageLease.Page;
 
         var schemaPageNumber = headerPage.PageCount++;
         // allocate a new schema page from page buffer
@@ -96,11 +99,6 @@ public class SchemaManager(PageBufferManager pageBufferManager)
         pageBufferManager.MarkPageDirty(headerPage.SchemaDirectoryPageNumber);
         pageBufferManager.MarkPageDirty(schemaPageNumber);
         pageBufferManager.MarkPageDirty(newDataPageNumber);
-        
-        pageBufferManager.FreePage(0);  
-        pageBufferManager.FreePage(headerPage.SchemaDirectoryPageNumber);
-        pageBufferManager.FreePage(schemaPageNumber);
-        pageBufferManager.FreePage(newDataPageNumber);
     }
 
     public async Task RemoveSchemaAsync(string schemaName)
@@ -110,9 +108,11 @@ public class SchemaManager(PageBufferManager pageBufferManager)
             throw new KeyNotFoundException($"Schema '{schemaName}' does not exist.");
         }
 
-        var headerPage = await pageBufferManager.ReadPageAsync<DatabaseHeaderPage>(0);
-        var schemaDirectoryPage =
-            await pageBufferManager.ReadPageAsync<SchemaDirectoryPage>(headerPage.SchemaDirectoryPageNumber);
+        using var headerPageLease = await pageBufferManager.LeasePageAsync<DatabaseHeaderPage>(0);
+        var headerPage = headerPageLease.Page;
+        using var schemaDirectoryPageLease =
+            await pageBufferManager.LeasePageAsync<SchemaDirectoryPage>(headerPageLease.Page.SchemaDirectoryPageNumber);
+        var schemaDirectoryPage = schemaDirectoryPageLease.Page;
         var directoryEntry = Array.IndexOf(schemaDirectoryPage.SchemaPageNumbers, schemaEntry.SchemaPageNumber);
 
         if (directoryEntry < 0)
@@ -125,8 +125,6 @@ public class SchemaManager(PageBufferManager pageBufferManager)
         _schemaDirectory.Remove(schemaName);
         pageBufferManager.MarkPageDirty(headerPage.SchemaDirectoryPageNumber);
         pageBufferManager.MarkPageDirty(schemaEntry.SchemaPageNumber);
-        pageBufferManager.FreePage(headerPage.SchemaDirectoryPageNumber);
-        pageBufferManager.FreePage(schemaEntry.SchemaPageNumber);
     }
 
     public bool ValidateDataAgainstSchema(Schema schema, KeyValuePair<string, object>[] data)
@@ -230,17 +228,20 @@ public class SchemaManager(PageBufferManager pageBufferManager)
     private static Dictionary<string, SchemaEntry> LoadSchemaDirectory(PageBufferManager pageBufferManager)
     {
         var schemas = new Dictionary<string, SchemaEntry>(NameComparer);
-        var headerPage = pageBufferManager.ReadPageAsync<DatabaseHeaderPage>(0).GetAwaiter().GetResult();
-        var schemaDirectoryPage = pageBufferManager
-            .ReadPageAsync<SchemaDirectoryPage>(headerPage.SchemaDirectoryPageNumber)
+        using var headerPageLease = pageBufferManager.LeasePageAsync<DatabaseHeaderPage>(0).GetAwaiter().GetResult();
+        var headerPage = headerPageLease.Page;
+        using var schemaDirectoryPageLease = pageBufferManager
+            .LeasePageAsync<SchemaDirectoryPage>(headerPage.SchemaDirectoryPageNumber)
             .GetAwaiter()
             .GetResult();
+        var schemaDirectoryPage = schemaDirectoryPageLease.Page;
 
         foreach (var schemaPageNumber in schemaDirectoryPage.NonDeletedSchemaPageNumbers)
         {
-            var schemaPage = pageBufferManager.ReadPageAsync<SchemaPage>(schemaPageNumber)
+            using var schemaPageLease = pageBufferManager.LeasePageAsync<SchemaPage>(schemaPageNumber)
                 .GetAwaiter()
                 .GetResult();
+            var schemaPage = schemaPageLease.Page;
 
             if (!schemas.TryAdd(schemaPage.Name, new SchemaEntry(
                     GetSchemaFromPage(schemaPage),
@@ -252,7 +253,6 @@ public class SchemaManager(PageBufferManager pageBufferManager)
                     $"The schema directory contains duplicate schema name '{schemaPage.Name}'.");
             }
         }
-        pageBufferManager.FreePage(headerPage.SchemaDirectoryPageNumber);
 
         return schemas;
     }
