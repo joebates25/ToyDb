@@ -50,7 +50,7 @@ public class SchemaManager(PageBufferManager pageBufferManager)
         var schemaDirectoryPage =
             await pageBufferManager.ReadPageAsync<SchemaDirectoryPage>(headerPage.SchemaDirectoryPageNumber);
 
-        var schemaPageNumber = ++headerPage.PageCount;
+        var schemaPageNumber = headerPage.PageCount++;
         // allocate a new schema page from page buffer
         var schemaPage = pageBufferManager.AllocatePage<SchemaPage>(schemaPageNumber);
 
@@ -81,7 +81,7 @@ public class SchemaManager(PageBufferManager pageBufferManager)
         // update schema directory page with new schema location
         schemaDirectoryPage.InsertSchemaDirectoryEntry(schemaPageNumber);
 
-        var newDataPageNumber = ++headerPage.PageCount;
+        var newDataPageNumber = headerPage.PageCount++;
         pageBufferManager.AllocatePage<DataPage>(newDataPageNumber);
         schemaPage.FirstDataPageNumber = newDataPageNumber;
         schemaPage.LastDataPageNumber  = newDataPageNumber;
@@ -91,6 +91,16 @@ public class SchemaManager(PageBufferManager pageBufferManager)
             schemaPageNumber,
             newDataPageNumber,
             newDataPageNumber));
+        
+        pageBufferManager.MarkPageDirty(0);
+        pageBufferManager.MarkPageDirty(headerPage.SchemaDirectoryPageNumber);
+        pageBufferManager.MarkPageDirty(schemaPageNumber);
+        pageBufferManager.MarkPageDirty(newDataPageNumber);
+        
+        pageBufferManager.FreePage(0);  
+        pageBufferManager.FreePage(headerPage.SchemaDirectoryPageNumber);
+        pageBufferManager.FreePage(schemaPageNumber);
+        pageBufferManager.FreePage(newDataPageNumber);
     }
 
     public async Task RemoveSchemaAsync(string schemaName)
@@ -113,6 +123,10 @@ public class SchemaManager(PageBufferManager pageBufferManager)
 
         schemaDirectoryPage.ClearSchemaDirectoryEntry(directoryEntry);
         _schemaDirectory.Remove(schemaName);
+        pageBufferManager.MarkPageDirty(headerPage.SchemaDirectoryPageNumber);
+        pageBufferManager.MarkPageDirty(schemaEntry.SchemaPageNumber);
+        pageBufferManager.FreePage(headerPage.SchemaDirectoryPageNumber);
+        pageBufferManager.FreePage(schemaEntry.SchemaPageNumber);
     }
 
     public bool ValidateDataAgainstSchema(Schema schema, KeyValuePair<string, object>[] data)
@@ -238,6 +252,7 @@ public class SchemaManager(PageBufferManager pageBufferManager)
                     $"The schema directory contains duplicate schema name '{schemaPage.Name}'.");
             }
         }
+        pageBufferManager.FreePage(headerPage.SchemaDirectoryPageNumber);
 
         return schemas;
     }

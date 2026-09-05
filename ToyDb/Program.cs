@@ -1,7 +1,7 @@
 using ToyDb;
 
 var dbLocation = Path.GetFullPath("toy-store-demo.toydb");
-var resetRequested = args.Contains("--reset", StringComparer.OrdinalIgnoreCase);
+var resetRequested = true;
 
 if (resetRequested && File.Exists(dbLocation))
 {

@@ -34,7 +34,7 @@ public class Database : IDisposable
     {
         _pageBufferManager = new PageBufferManager(
             new FileIoManager(filePath),
-            pageBufferConfig: new PageBufferConfig(FrameCount: 2_000));
+            pageBufferConfig: new PageBufferConfig(FrameCount: 20));
         var headerPage = _pageBufferManager.ReadPageAsync<DatabaseHeaderPage>(0).Result;
         var welcomeValid = headerPage.WelcomeMessage == Constants.WelcomeMessage;
         if (!welcomeValid) throw new Exception("Invalid database format.");
@@ -67,6 +67,9 @@ public class Database : IDisposable
         pageBuffer.AllocatePage<SchemaDirectoryPage>(SchemaDirectoryPageNumber);
         newHeaderPage.SchemaDirectoryPageNumber = SchemaDirectoryPageNumber;
         newHeaderPage.PageCount                 = 2;
+        
+        pageBuffer.FreePage(0);
+        pageBuffer.FreePage(1);
 
         await pageBuffer.FlushAsync();
     }

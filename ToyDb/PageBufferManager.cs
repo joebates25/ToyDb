@@ -72,7 +72,7 @@ public class PageBufferManager : IDisposable
     // todo: page probably needs page number at this point
     public void FreePage(int pageNumber)
     {
-        // Page is not allocated -- abort
+        // Page is not even allocated -- abort
         if (!_pageBufferTable.TryGetValue(pageNumber, out var frame)) return;
 
         var newPinCount = frame.PinCount > 0 ? frame.PinCount - 1 : 0;
@@ -89,11 +89,11 @@ public class PageBufferManager : IDisposable
         _logger.Log(LogLevel.Information, "Flushing page buffers");
         foreach (var dirtyPage in _dirtyPages)
         {
-            var frame = _pageBufferTable[dirtyPage];
-            if (frame.InUse) continue;
+            var dirtyFrame = _pageBufferTable[dirtyPage];
+            if (dirtyFrame.InUse) continue;
             
             var pageMemory =
-                (ReadOnlyMemory<byte>) GetBufferFrame(frame.FrameNumber);
+                (ReadOnlyMemory<byte>) GetBufferFrame(dirtyFrame.FrameNumber);
             await _fileIoManager.WriteAsync(dirtyPage * Constants.PageSizeBytes, pageMemory);
         }
 
