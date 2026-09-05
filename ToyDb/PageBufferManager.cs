@@ -92,8 +92,8 @@ public class PageBufferManager : IDisposable
 
             var pageMemory =
                 (ReadOnlyMemory<byte>) GetBufferFrame(dirtyFrame.FrameNumber);
-            _logger.Log(LogLevel.Information, "Flushing dirty page {PageNumber} to disk", dirtyPage);
             await _fileIoManager.WriteAsync(dirtyPage * Constants.PageSizeBytes, pageMemory);
+            _logger.Log(LogLevel.Information, "Flushed dirty page {PageNumber} to disk", dirtyPage);
         }
 
         _dirtyPages.Clear();

@@ -6,7 +6,7 @@ public abstract class Page(Memory<byte> data) : IDisposable
 {
     private bool _isDisposed;
 
-    public Memory<byte> Data => _isDisposed ? throw new ObjectDisposedException(nameof(Page)) : field;
+    public Memory<byte> Data => _isDisposed ? throw new ObjectDisposedException(nameof(Page)) : data;
 
     public void Dispose()
     {
