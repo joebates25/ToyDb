@@ -3,6 +3,8 @@
 public class Schema(string name)
 {
     public string Name { get; set; } = name;
+    
+    // todo: change to dictionary
     public List<Field> Fields { get; set; } = [];
 
     // todo: should not need length except for strings 

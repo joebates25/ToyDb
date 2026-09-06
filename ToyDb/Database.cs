@@ -23,7 +23,7 @@ public class Database : IDisposable
     private readonly ExecutionEngine _executionEngine;
 
     /*
-     * Init todo list:
+     * Init procedure:
      * Start up page buffer
      * Grab header + info
      * Confirm database is minimally valid
@@ -72,10 +72,6 @@ public class Database : IDisposable
                 newHeaderPage.PageCount                 = 2;
             }
         }
-
-        pageBuffer.MarkPageDirty(0);
-        pageBuffer.MarkPageDirty(1);
-
         await pageBuffer.FlushAsync();
     }
 

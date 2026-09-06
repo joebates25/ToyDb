@@ -1,11 +1,17 @@
 ﻿namespace ToyDb;
 
-public class PageLease<T>(T page, PageLease<T>.ReleasePageDelegate releasePageDelegate, int pageNumber)
+public class PageLease<T>(
+    T page,
+    PageLease<T>.ReleasePageDelegate releasePageDelegate,
+    PageLease<T>.DirtyPageDelegate dirtyPageDelegate,
+    int pageNumber)
     : IDisposable
     where T : Page
 {
     private bool _disposed;
-    public T Page {
+
+    public T Page
+    {
         get
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
@@ -13,7 +19,7 @@ public class PageLease<T>(T page, PageLease<T>.ReleasePageDelegate releasePageDe
         }
     }
 
-    private int PageNumber { get; } = pageNumber;
+    public int PageNumber { get; } = pageNumber;
 
     public void Dispose()
     {
@@ -22,4 +28,13 @@ public class PageLease<T>(T page, PageLease<T>.ReleasePageDelegate releasePageDe
     }
 
     public delegate void ReleasePageDelegate(int pageNumber);
+
+    public delegate void DirtyPageDelegate(int pageNumber);
+
+    public void MarkDirty()
+    {
+        if (_disposed) throw new ObjectDisposedException(nameof(PageLease<T>));
+        
+        dirtyPageDelegate?.Invoke(PageNumber);
+    }
 }

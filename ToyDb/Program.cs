@@ -77,9 +77,11 @@ await database.CloseAsync();
 static async Task CreateAndSeedDatabaseAsync(string dbLocation)
 {
     Console.WriteLine("Creating schemas and inserting realistic sample data...");
+    var customerRows = BuildCustomerRows(120);
+    int insertedCustomers = 0;
 
     await Database.InitializeAsync(dbLocation);
-    using var database = Database.Open(dbLocation);
+    var database = Database.Open(dbLocation);
 
     await database.AddSchemaAsync(
         new Schema("Customers")
@@ -109,26 +111,32 @@ static async Task CreateAndSeedDatabaseAsync(string dbLocation)
             .AddField("ItemCount", SchemaFieldType.Integer, sizeof(int))
             .AddField("IsComplete", SchemaFieldType.Boolean, sizeof(byte)));
 
-    var customerRows = BuildCustomerRows(120);
-    var productRows = BuildProductRows();
-    var orderRows = BuildOrderRows(240, customerRows.Length);
-
-    var insertedCustomers = await database.InsertAsync(
+    insertedCustomers = await database.InsertAsync(
         "Customers",
         ["Id", "FullName", "Email", "City", "LoyaltyPoints", "IsActive"],
-        customerRows);
+        customerRows.Take(50).ToArray());
 
-    var insertedProducts = await database.InsertAsync(
+    await database.CloseAsync();
+    database = Database.Open(dbLocation);
+    insertedCustomers += await database.InsertAsync(
+        "Customers",
+        ["Id", "FullName", "Email", "City", "LoyaltyPoints", "IsActive"],
+        customerRows.Skip(50).ToArray());
+    await database.CloseAsync();
+    var productRows = BuildProductRows();
+    var orderRows = BuildOrderRows(240, customerRows.Length);
+    using var database2 = Database.Open(dbLocation);
+    var insertedProducts = await database2.InsertAsync(
         "Products",
         ["Id", "Sku", "Name", "Category", "PriceInCents", "UnitsInStock", "IsActive"],
         productRows);
 
-    var insertedOrders = await database.InsertAsync(
+    var insertedOrders = await database2.InsertAsync(
         "Orders",
         ["Id", "CustomerId", "PlacedAtUnixSeconds", "TotalInCents", "ItemCount", "IsComplete"],
         orderRows);
 
-    await database.CloseAsync();
+    await database2.CloseAsync();
 
     Console.WriteLine(
         $"Inserted {insertedCustomers} customers, {insertedProducts} products, and {insertedOrders} orders.");

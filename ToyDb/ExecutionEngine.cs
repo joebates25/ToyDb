@@ -22,6 +22,7 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
 
         using var insertPageLease = await pageBufferManager.LeasePageAsync<DataPage>(
             schemaManager.GetLastDataPageNumber(tableName));
+        insertPageLease.MarkDirty();
         var insertPage = insertPageLease.Page;
         foreach (var valueSet in valueSets)
         {
@@ -34,6 +35,7 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
             if (!HasFreeSpaceForInsert(insertPage, rowData.Length))
             {
                 using var headerPageLease = await pageBufferManager.LeasePageAsync<DatabaseHeaderPage>(0);
+                headerPageLease.MarkDirty();
                 var headerPage = headerPageLease.Page;
                 var insertedPageNumber = ++headerPage.PageCount;
                 using var newDataPageLease = pageBufferManager.AllocatePageLease<DataPage>(insertedPageNumber);
@@ -112,6 +114,8 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
         do
         {
             using var dataPageLease = await pageBufferManager.LeasePageAsync<DataPage>(dataPageNumber);
+            dataPageLease.MarkDirty();
+            
             var dataPage = dataPageLease.Page;
             dataPageNumber = dataPage.OverFlowPageNumber;
 

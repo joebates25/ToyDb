@@ -38,7 +38,8 @@ public class PageBufferManager : IDisposable
         {
             _pageBufferTable[pageNumber] = frame with {PinCount = frame.PinCount + 1};
             _evictionPolicy.MarkPageInUse(pageNumber);
-            return new PageLease<TPage>(TPage.CreatePage(GetBufferFrame(frame.FrameNumber)), FreePage, pageNumber);
+            return new PageLease<TPage>(TPage.CreatePage(GetBufferFrame(frame.FrameNumber)), OnFreePage, OnDirtyPage,
+                pageNumber);
         }
 
         // todo: if anything fails, frame stays unfree. need to fix
@@ -51,7 +52,7 @@ public class PageBufferManager : IDisposable
         _pageBufferTable.Add(pageNumber, BufferTableEntry.Create(frameNumber));
         _evictionPolicy.MarkPageInUse(pageNumber);
 
-        return new PageLease<TPage>(TPage.CreatePage(bufferSlice), FreePage, pageNumber);
+        return new PageLease<TPage>(TPage.CreatePage(bufferSlice), OnFreePage, OnDirtyPage, pageNumber);
     }
 
     public PageLease<TPage> AllocatePageLease<TPage>(int pageNumber) where TPage : Page, IPageFactory<TPage>
@@ -67,11 +68,10 @@ public class PageBufferManager : IDisposable
         _pageBufferTable.Add(pageNumber, BufferTableEntry.CreateDirty(firstFreeFrameNumber));
         _dirtyPages.Add(pageNumber);
 
-        return new PageLease<TPage>(TPage.InitializePage(bufferSlice), FreePage, pageNumber);
+        return new PageLease<TPage>(TPage.InitializePage(bufferSlice), OnFreePage, OnDirtyPage, pageNumber);
     }
 
-    // todo: page probably needs page number at this point
-    public void FreePage(int pageNumber)
+    private void OnFreePage(int pageNumber)
     {
         // Page is not even allocated -- abort
         if (!_pageBufferTable.TryGetValue(pageNumber, out var frame)) return;
@@ -80,6 +80,14 @@ public class PageBufferManager : IDisposable
         _pageBufferTable[pageNumber] = frame with {PinCount = newPinCount};
 
         if (newPinCount == 0) _evictionPolicy.MarkPageNotInUse(pageNumber);
+    }
+
+    private void OnDirtyPage(int pageNumber)    
+    {
+        if (!_pageBufferTable.TryGetValue(pageNumber, out var frame)) return;
+
+        _pageBufferTable[pageNumber] = frame with {Dirty = true};
+        _dirtyPages.Add(pageNumber);
     }
 
     public async Task FlushAsync()
