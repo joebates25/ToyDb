@@ -60,7 +60,7 @@ public class DataPage(Memory<byte> data) : Page(data), IPageFactory<DataPage>
 
     private ref DataPageHeader Header => ref MemoryMarshal.AsRef<DataPageHeader>(Data.Span);
 
-    private Span<DataPageSlot> Slots =>
+    private Span<DataPageSlot> SlotSpace =>
         MemoryMarshal.Cast<byte, DataPageSlot>(Data.Span[DataPageHeaderSize..]);
 
     public int SlotCount
@@ -81,10 +81,10 @@ public class DataPage(Memory<byte> data) : Page(data), IPageFactory<DataPage>
         set => Header.OverFlowPageNumber = value;
     }
 
-    public IEnumerable<Slot> EnumerateSlots()
+    public IEnumerable<Slot> Slots()
     {
         var slotCount = SlotCount;
-        if ((uint) slotCount > (uint) Slots.Length)
+        if ((uint) slotCount > (uint) SlotSpace.Length)
         {
             throw new InvalidDataException(
                 $"Page contains an invalid slot count of {slotCount}.");
@@ -92,42 +92,25 @@ public class DataPage(Memory<byte> data) : Page(data), IPageFactory<DataPage>
 
         for (var index = 0; index < slotCount; index++)
         {
-            yield return this[index];
+            yield return GetSlot(index);
         }
     }
 
     public int FreeSpaceSize => FreeSpaceEnd - DataPageHeaderSize - (SlotSize * SlotCount);
 
-    public Slot this[int index]
+    public Slot GetSlot(int index)
     {
-        get
+        if (index < 0 || index >= SlotCount)
         {
-            if (index < 0 || index >= SlotCount)
-            {
-                throw new ArgumentOutOfRangeException(nameof(index));
-            }
-
-            ref var slotEntry = ref Slots[index];
-
-            return new Slot(
-                InUse: slotEntry.InUse != 0,
-                OffsetStart: slotEntry.OffsetStart,
-                Length: slotEntry.Length);
+            throw new ArgumentOutOfRangeException(nameof(index));
         }
-        internal set
-        {
-            if (index < 0 || index >= SlotCount)
-            {
-                throw new ArgumentOutOfRangeException(nameof(index));
-            }
 
-            Slots[index] = new DataPageSlot
-            {
-                InUse       = (byte) (value.InUse ? 1 : 0),
-                OffsetStart = value.OffsetStart,
-                Length      = value.Length
-            };
-        }
+        ref var slotEntry = ref SlotSpace[index];
+
+        return new Slot(
+            InUse: slotEntry.InUse != 0,
+            OffsetStart: slotEntry.OffsetStart,
+            Length: slotEntry.Length);
     }
 
     public Slot InsertCell(ReadOnlyMemory<byte> cellData)
@@ -151,7 +134,7 @@ public class DataPage(Memory<byte> data) : Page(data), IPageFactory<DataPage>
             Length: checked((ushort) cellData.Length));
 
         // write slot
-        ref var slotEntry = ref Slots[slotCount];
+        ref var slotEntry = ref SlotSpace[slotCount];
         slotEntry             = default;
         slotEntry.InUse       = slot.InUse ? (byte) 1 : (byte) 0;
         slotEntry.OffsetStart = slot.OffsetStart;
@@ -173,7 +156,7 @@ public class DataPage(Memory<byte> data) : Page(data), IPageFactory<DataPage>
             throw new ArgumentOutOfRangeException(nameof(slotIndex));
         }
 
-        Slots[slotIndex].InUse = 0;
+        SlotSpace[slotIndex].InUse = 0;
     }
 
     public static DataPage CreatePage(Memory<byte> data)

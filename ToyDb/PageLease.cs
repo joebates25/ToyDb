@@ -19,12 +19,13 @@ public class PageLease<T>(
         }
     }
 
-    public int PageNumber { get; } = pageNumber;
+    private int PageNumber { get; } = pageNumber;
+    private bool IsDirty { get; set; }
 
     public void Dispose()
     {
         _disposed = true;
-        releasePageDelegate?.Invoke(PageNumber);
+        releasePageDelegate.Invoke(PageNumber);
     }
 
     public delegate void ReleasePageDelegate(int pageNumber);
@@ -34,7 +35,9 @@ public class PageLease<T>(
     public void MarkDirty()
     {
         if (_disposed) throw new ObjectDisposedException(nameof(PageLease<T>));
-        
-        dirtyPageDelegate?.Invoke(PageNumber);
+        if (IsDirty) return;
+
+        IsDirty = true;
+        dirtyPageDelegate.Invoke(PageNumber);
     }
 }

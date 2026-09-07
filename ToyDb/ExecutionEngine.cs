@@ -1,5 +1,6 @@
 ﻿using System.Buffers.Binary;
 using System.Text;
+using ToyDb.AST;
 using ToyDb.Pages;
 
 namespace ToyDb;
@@ -51,6 +52,27 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
         return insertedRowCount;
     }
 
+    public IAsyncEnumerable<object[]> SelectAsync(
+        SelectExpression selectExpression)
+    {
+        return SelectAsync(
+            selectExpression.TableName,
+            selectExpression.Columns.ToArray(),
+            selectExpression.WhereExpressions?.Select(where => new QueryFilter(
+                where.ColumnName,
+                where.Operator.Operator switch
+                {
+                    ">" => QueryFilterOperator.GreaterThan,
+                    "<" => QueryFilterOperator.LessThan,
+                    "=" => QueryFilterOperator.EqualTo,
+                    _ => throw new ArgumentOutOfRangeException(
+                        nameof(where.Operator),
+                        where.Operator,
+                        "Unknown query filter operator.")
+                },
+                where.Value)).ToArray());
+    }
+
     public async IAsyncEnumerable<object[]> SelectAsync(
         string tableName,
         string[] columns,
@@ -79,7 +101,7 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
             var dataPage = dataPageLease.Page;
             dataPageNumber = dataPage.OverFlowPageNumber;
 
-            foreach (var slot in dataPage.EnumerateSlots())
+            foreach (var slot in dataPage.Slots())
             {
                 if (!slot.InUse) continue;
 
@@ -114,14 +136,13 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
         do
         {
             using var dataPageLease = await pageBufferManager.LeasePageAsync<DataPage>(dataPageNumber);
-            dataPageLease.MarkDirty();
-            
+
             var dataPage = dataPageLease.Page;
             dataPageNumber = dataPage.OverFlowPageNumber;
 
             for (var slotNum = 0; slotNum < dataPage.SlotCount; slotNum++)
             {
-                var slot = dataPage[slotNum];
+                var slot = dataPage.GetSlot(slotNum);
                 if (!slot.InUse) continue;
 
                 var dataRow = dataPage.Data.Slice(slot.OffsetStart, slot.Length);
@@ -129,6 +150,7 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
                 if (!DataRowPassesFilter(schema, dataRow, filter)) continue;
 
                 dataPage.FreeSlot(slotNum);
+                dataPageLease.MarkDirty();
                 deleteCount++;
             }
         } while (dataPageNumber != -1);

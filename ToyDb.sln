@@ -6,6 +6,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ToyDb.Tests", "ToyDb.Tests\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ToyDb.Benchmarks", "ToyDb.Benchmarks\ToyDb.Benchmarks.csproj", "{CF37D416-D4C0-4DBA-841C-5A4C6B7DD083}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ToyDb.AST", "ToyDb.AST\ToyDb.AST.csproj", "{4F92BDFF-78E8-42A4-9687-58B4099FE9DB}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -24,5 +26,9 @@ Global
 		{CF37D416-D4C0-4DBA-841C-5A4C6B7DD083}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{CF37D416-D4C0-4DBA-841C-5A4C6B7DD083}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{CF37D416-D4C0-4DBA-841C-5A4C6B7DD083}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4F92BDFF-78E8-42A4-9687-58B4099FE9DB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4F92BDFF-78E8-42A4-9687-58B4099FE9DB}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4F92BDFF-78E8-42A4-9687-58B4099FE9DB}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4F92BDFF-78E8-42A4-9687-58B4099FE9DB}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
