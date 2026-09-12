@@ -20,7 +20,7 @@ else
     Console.WriteLine("Using the existing database. Pass --reset to rebuild the sample data.");
 }
 
-using var database = Database.Open(dbLocation);
+using var database = await Database.OpenAsync(dbLocation);
 
 await PrintRowsAsync(
     database,
@@ -80,8 +80,7 @@ static async Task CreateAndSeedDatabaseAsync(string dbLocation)
     var customerRows = BuildCustomerRows(120);
     int insertedCustomers = 0;
 
-    await Database.InitializeAsync(dbLocation);
-    var database = Database.Open(dbLocation);
+        var database = await Database.OpenAsync(dbLocation);    
 
     await database.AddSchemaAsync(
         new Schema("Customers")
@@ -117,7 +116,7 @@ static async Task CreateAndSeedDatabaseAsync(string dbLocation)
         customerRows.Take(50).ToArray());
 
     await database.CloseAsync();
-    database = Database.Open(dbLocation);
+    database = await Database.OpenAsync(dbLocation);
     insertedCustomers += await database.InsertAsync(
         "Customers",
         ["Id", "FullName", "Email", "City", "LoyaltyPoints", "IsActive"],
@@ -125,7 +124,7 @@ static async Task CreateAndSeedDatabaseAsync(string dbLocation)
     await database.CloseAsync();
     var productRows = BuildProductRows();
     var orderRows = BuildOrderRows(240, customerRows.Length);
-    using var database2 = Database.Open(dbLocation);
+    using var database2 = await Database.OpenAsync(dbLocation);
     var insertedProducts = await database2.InsertAsync(
         "Products",
         ["Id", "Sku", "Name", "Category", "PriceInCents", "UnitsInStock", "IsActive"],

@@ -1,13 +1,19 @@
 ﻿using System.Buffers.Binary;
 using System.Text;
+using Microsoft.Extensions.Logging;
 using ToyDb.AST;
 using ToyDb.Pages;
 
 namespace ToyDb;
 
-public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager schemaManager)
+public class ExecutionEngine(
+    PageBufferManager pageBufferManager,
+    SchemaManager schemaManager,
+    DatabaseManager databaseManager)
 {
-    public async Task<int> InsertAsync(string tableName, string[] columns, object[][] valueSets)
+    private ILogger Logger { get; } = Logging.LoggerFactory.CreateLogger<ExecutionEngine>();
+
+    public async Task<int> InsertAsync(string tableName, string[] columns, IEnumerable<object[]> valueSets)
     {
         var insertedRowCount = 0;
         if (!schemaManager.HasSchema(tableName))
@@ -21,12 +27,14 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
             throw new Exception("Invalid columns provided");
         }
 
-        using var insertPageLease = await pageBufferManager.LeasePageAsync<DataPage>(
+        Logger.LogInformation("Attempting to insert rows into table {tableName}.", tableName);
+
+        var insertPageLease = await pageBufferManager.LeasePageAsync<DataPage>(
             schemaManager.GetLastDataPageNumber(tableName));
         insertPageLease.MarkDirty();
-        var insertPage = insertPageLease.Page;
         foreach (var valueSet in valueSets)
         {
+            var insertPage = insertPageLease.Page;
             if (!TryValueSetValidation(schema, columns, valueSet, out var errorMessage))
             {
                 throw new Exception(errorMessage);
@@ -35,19 +43,27 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
             var rowData = ConvertDataToBytes(schema, columns, valueSet);
             if (!HasFreeSpaceForInsert(insertPage, rowData.Length))
             {
-                using var headerPageLease = await pageBufferManager.LeasePageAsync<DatabaseHeaderPage>(0);
-                headerPageLease.MarkDirty();
-                var headerPage = headerPageLease.Page;
-                var insertedPageNumber = ++headerPage.PageCount;
-                using var newDataPageLease = pageBufferManager.AllocatePageLease<DataPage>(insertedPageNumber);
-                insertPage.OverFlowPageNumber = insertedPageNumber;
-                insertPage                    = newDataPageLease.Page;
-                await schemaManager.UpdateLastDataPageNumberAsync(tableName, insertedPageNumber);
+                Logger.LogDebug(
+                    "Current data page {pageNumber} is full. Allocating a new data page for table {tableName}.",
+                    insertPageLease.PageNumber, tableName);
+                insertPageLease.Dispose();
+
+                insertPageLease = await databaseManager.LeaseNewPage<DataPage>();
+                insertPageLease.MarkDirty();
+                insertPage.OverFlowPageNumber = insertPageLease.PageNumber;
+
+                insertPage = insertPageLease.Page;
+                await schemaManager.UpdateLastDataPageNumberAsync(tableName, insertPageLease.PageNumber);
             }
+
+            Logger.LogDebug("Writing row data to data page {pageNumber} for table {tableName}.",
+                insertPageLease.PageNumber, tableName);
 
             insertPage.InsertCell(rowData);
             insertedRowCount++;
         }
+
+        insertPageLease.Dispose();
 
         return insertedRowCount;
     }
@@ -97,7 +113,7 @@ public class ExecutionEngine(PageBufferManager pageBufferManager, SchemaManager 
         var dataPageNumber = schemaManager.GetFirstDataPageNumber(tableName);
         do
         {
-            using var dataPageLease = (await pageBufferManager.LeasePageAsync<DataPage>(dataPageNumber));
+            using var dataPageLease = await pageBufferManager.LeasePageAsync<DataPage>(dataPageNumber);
             var dataPage = dataPageLease.Page;
             dataPageNumber = dataPage.OverFlowPageNumber;
 

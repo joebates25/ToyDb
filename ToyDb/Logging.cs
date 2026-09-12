@@ -6,5 +6,5 @@ public static class Logging
 {
     public static readonly ILoggerFactory LoggerFactory =
         Microsoft.Extensions.Logging.LoggerFactory.Create(builder =>
-            builder.AddSimpleConsole(options => { options.SingleLine = true; }));
+            builder.AddSimpleConsole(options => { options.SingleLine = true;  }));
 }

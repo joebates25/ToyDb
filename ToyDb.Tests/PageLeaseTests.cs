@@ -8,7 +8,7 @@ public class PageLeaseTests
     public void AccessingPageAfterLeaseIsDisposedThrows()
     {
         using var page = DataPage.InitializePage(new byte[Constants.PageSizeBytes]);
-        var lease = new PageLease<DataPage>(page, _ => { }, 0);
+        var lease = new PageLease<DataPage>(page, _ => { }, _ => { },0);
 
         Assert.That(lease.Page, Is.SameAs(page));
 

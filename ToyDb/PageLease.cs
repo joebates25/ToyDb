@@ -19,7 +19,7 @@ public class PageLease<T>(
         }
     }
 
-    private int PageNumber { get; } = pageNumber;
+    public int PageNumber { get; } = pageNumber;
     private bool IsDirty { get; set; }
 
     public void Dispose()

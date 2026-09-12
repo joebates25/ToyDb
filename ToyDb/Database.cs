@@ -22,6 +22,7 @@ public class Database : IDisposable
 
     private readonly ExecutionEngine _executionEngine;
 
+
     /*
      * Init procedure:
      * Start up page buffer
@@ -34,24 +35,26 @@ public class Database : IDisposable
     {
         _pageBufferManager = new PageBufferManager(
             new FileIoManager(filePath),
-            pageBufferConfig: new PageBufferConfig(FrameCount: 20));
+            pageBufferConfig: new PageBufferConfig(FrameCount: 2000));
         using var headerPageLease = _pageBufferManager.LeasePageAsync<DatabaseHeaderPage>(0).Result;
         var headerPage = headerPageLease.Page;
         var welcomeValid = headerPage.WelcomeMessage == Constants.WelcomeMessage;
         if (!welcomeValid) throw new Exception("Invalid database format.");
 
         _schemaManager   = new SchemaManager(_pageBufferManager);
-        _executionEngine = new ExecutionEngine(_pageBufferManager, _schemaManager);
+        var databaseManager = new DatabaseManager(_pageBufferManager);
+        _executionEngine = new ExecutionEngine(_pageBufferManager, _schemaManager, databaseManager);
 
         Info = new DatabaseInfo
         {
             Version                   = headerPage.Version,
             PageCount                 = headerPage.PageCount,
-            SchemaDirectoryPageNumber = headerPage.SchemaDirectoryPageNumber
+            SchemaDirectoryPageNumber = headerPage.SchemaDirectoryPageNumber,
+            FilePath = filePath
         };
     }
 
-    public static async Task InitializeAsync(string filePath)
+    private static async Task<Database> InitializeAsync(string filePath)
     {
         if (File.Exists(filePath))
         {
@@ -73,14 +76,19 @@ public class Database : IDisposable
             }
         }
         await pageBuffer.FlushAsync();
+        return await OpenAsync(filePath);
     }
 
-    public static Database Open(string filePath) =>
+    public static Task<Database> OpenAsync(string filePath) =>
         !File.Exists(filePath)
-            ? throw new Exception("File not found.")
-            : new Database(filePath);
+            ? InitializeAsync(filePath)
+            : Task.FromResult(new Database(filePath));
 
-    public Task CloseAsync() => _pageBufferManager.FlushAsync();
+    public async Task CloseAsync()
+    {
+        await _pageBufferManager.FlushAsync();
+        _pageBufferManager.Dispose();
+    }
 
     public void Dispose()
     {
@@ -97,8 +105,13 @@ public class Database : IDisposable
     {
         return _schemaManager.RemoveSchemaAsync(schemaName);
     }
+    
+    public Schema GetSchema(string schemaName)
+    {
+        return _schemaManager.GetSchema(schemaName);
+    }
 
-    public Task<int> InsertAsync(string tableName, string[] columns, object[][] valueSets)
+    public Task<int> InsertAsync(string tableName, string[] columns, IEnumerable<object[]> valueSets)
     {
         return _executionEngine.InsertAsync(tableName, columns, valueSets);
     }
@@ -136,4 +149,5 @@ public record DatabaseInfo
     public int Version { get; init; }
     public int PageCount { get; init; }
     public int SchemaDirectoryPageNumber { get; init; }
+    public string FilePath { get; init; }
 }
