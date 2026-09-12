@@ -63,14 +63,15 @@ public class Database : IDisposable
         };
     }
 
-    private static async Task<Database> InitializeAsync(string filePath)
+    private static async Task<Database> InitializeAsync(string filePath, DatabaseConfig? config = null)
     {
         if (File.Exists(filePath))
         {
             throw new Exception("The file already exists. Try using Open()");
         }
 
-        using var services = DatabaseServices.Create(filePath, frameCount: 20);
+        config ??= new DatabaseConfig { FrameCount = 20 };
+        using var services = DatabaseServices.Create(filePath, config);
         var pageBuffer = services.GetRequiredService<PageBufferManager>();
 
         using (var newHeaderPageLease = pageBuffer
@@ -88,11 +89,11 @@ public class Database : IDisposable
         return await OpenAsync(filePath);
     }
 
-    public static Task<Database> OpenAsync(string filePath)
+    public static Task<Database> OpenAsync(string filePath, DatabaseConfig? config = null)
     {
-        if (!File.Exists(filePath)) return InitializeAsync(filePath);
+        if (!File.Exists(filePath)) return InitializeAsync(filePath, config);
 
-        var services = DatabaseServices.Create(filePath);
+        var services = DatabaseServices.Create(filePath, config);
         try
         {
             return Task.FromResult(new Database(filePath, services, services.GetRequiredService<ILoggerFactory>()));
@@ -179,4 +180,9 @@ public record DatabaseInfo
     public int PageCount { get; init; }
     public int SchemaDirectoryPageNumber { get; init; }
     public string FilePath { get; init; }
+}
+
+public record DatabaseConfig
+{
+    public int FrameCount { get; init; } = 20;
 }

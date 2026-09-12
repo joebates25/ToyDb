@@ -20,7 +20,7 @@ else
     Console.WriteLine("Using the existing database. Pass --reset to rebuild the sample data.");
 }
 
-using var database = await Database.OpenAsync(dbLocation);
+using var database = await Database.OpenAsync(dbLocation, new DatabaseConfig { FrameCount = 20 });
 
 await PrintRowsAsync(
     database,
@@ -80,7 +80,7 @@ static async Task CreateAndSeedDatabaseAsync(string dbLocation)
     var customerRows = BuildCustomerRows(120);
     int insertedCustomers = 0;
 
-        var database = await Database.OpenAsync(dbLocation);    
+        var database = await Database.OpenAsync(dbLocation, new DatabaseConfig { FrameCount = 20 });    
 
     await database.AddSchemaAsync(
         new Schema("Customers")
