@@ -19,11 +19,11 @@ public class DatabaseLifetimeTests
             first.Dispose();
 
             await second.InsertAsync("Items", ["Id"], [[2]]);
-            var secondRows = await second.SelectAsync("Items", ["Id"]).ToListAsync();
+            var secondRows = await second.ExecuteSqlQuery("SELECT Id FROM Items").ToListAsync();
             Assert.That(secondRows.Select(row => row[0]), Is.EqualTo(new[] { 2 }));
 
             using var reopened = await Database.OpenAsync(firstPath);
-            var firstRows = await reopened.SelectAsync("Items", ["Id"]).ToListAsync();
+            var firstRows = await reopened.ExecuteSqlQuery("SELECT Id FROM Items").ToListAsync();
             Assert.That(firstRows.Select(row => row[0]), Is.EqualTo(new[] { 1 }));
         }
         finally
