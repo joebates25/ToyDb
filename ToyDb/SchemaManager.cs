@@ -1,11 +1,15 @@
 ﻿using ToyDb.Pages;
 
+using Microsoft.Extensions.Logging;
+
 namespace ToyDb;
 
 using System.Text;
 
-public class SchemaManager(PageBufferManager pageBufferManager)
+public class SchemaManager(PageBufferManager pageBufferManager, ILoggerFactory loggerFactory)
 {
+    private ILogger Logger { get; } = loggerFactory.CreateLogger<SchemaManager>();
+
     private static readonly StringComparer NameComparer = StringComparer.Ordinal;
 
     private readonly Dictionary<string, SchemaEntry> _schemaDirectory = LoadSchemaDirectory(pageBufferManager);
@@ -40,6 +44,7 @@ public class SchemaManager(PageBufferManager pageBufferManager)
 
     public async Task AddSchemaAsync(Schema schema)
     {
+        Logger.LogInformation("Adding schema {SchemaName}.", schema.Name);
         if (HasSchema(schema.Name))
         {
             throw new InvalidOperationException($"Schema '{schema.Name}' already exists.");
@@ -104,6 +109,7 @@ public class SchemaManager(PageBufferManager pageBufferManager)
 
     public async Task RemoveSchemaAsync(string schemaName)
     {
+        Logger.LogInformation("Removing schema {SchemaName}.", schemaName);
         if (!_schemaDirectory.TryGetValue(schemaName, out var schemaEntry))
         {
             throw new KeyNotFoundException($"Schema '{schemaName}' does not exist.");

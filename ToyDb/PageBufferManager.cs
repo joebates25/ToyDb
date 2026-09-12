@@ -19,12 +19,13 @@ public class PageBufferManager : IDisposable
     private readonly IEvictionPolicy _evictionPolicy;
     private readonly HashSet<int> _dirtyPages = new();
 
-    public PageBufferManager(FileIoManager fileIoManager, PageBufferConfig? pageBufferConfig)
+    public PageBufferManager(FileIoManager fileIoManager, PageBufferConfig? pageBufferConfig,
+        ILoggerFactory loggerFactory)
     {
         var frameCount = pageBufferConfig?.FrameCount ?? 2_000;
 
         _fileIoManager = fileIoManager;
-        _logger        = Logging.LoggerFactory.CreateLogger<FileIoManager>();
+        _logger        = loggerFactory.CreateLogger<PageBufferManager>();
         _bufferPool    = new byte[Constants.PageSizeBytes * frameCount];
         _freeFrames    = new Stack<int>(Enumerable.Range(0, frameCount).Reverse());
         _evictionPolicy = new LruEvictionPolicy(

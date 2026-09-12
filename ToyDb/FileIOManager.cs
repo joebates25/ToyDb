@@ -3,7 +3,7 @@ using Microsoft.Win32.SafeHandles;
 
 namespace ToyDb;
 
-public partial class FileIoManager(string fileName) : IDisposable
+public partial class FileIoManager(string fileName, ILoggerFactory loggerFactory) : IDisposable
 {
     private readonly SafeFileHandle _safeFileHandle = File.OpenHandle(
         fileName,
@@ -11,7 +11,7 @@ public partial class FileIoManager(string fileName) : IDisposable
         FileAccess.ReadWrite,
         FileShare.ReadWrite);
 
-    private ILogger Logger { get; } = Logging.LoggerFactory.CreateLogger<FileIoManager>();
+    private ILogger Logger { get; } = loggerFactory.CreateLogger<FileIoManager>();
 
     public async Task WriteAsync(int offset, ReadOnlyMemory<byte> source)
     {

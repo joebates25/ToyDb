@@ -1,5 +1,7 @@
 using ToyDb.Pages;
 
+using Microsoft.Extensions.Logging.Abstractions;
+
 namespace ToyDb.Tests;
 
 public class PageBufferManagerTests
@@ -65,7 +67,8 @@ public class PageBufferManagerTests
     }
 
     private static PageBufferManager CreateManager(string databasePath) =>
-        new(new FileIoManager(databasePath), new PageBufferConfig(FrameCount: 1));
+        new(new FileIoManager(databasePath, NullLoggerFactory.Instance), new PageBufferConfig(FrameCount: 1),
+            NullLoggerFactory.Instance);
 
     private static string GetTempDatabasePath() =>
         Path.Combine(TestContext.CurrentContext.WorkDirectory, $"{Guid.NewGuid()}.toydb");

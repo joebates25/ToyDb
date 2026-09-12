@@ -9,9 +9,10 @@ namespace ToyDb;
 public class ExecutionEngine(
     PageBufferManager pageBufferManager,
     SchemaManager schemaManager,
-    DatabaseManager databaseManager)
+    DatabaseManager databaseManager,
+    ILoggerFactory loggerFactory)
 {
-    private ILogger Logger { get; } = Logging.LoggerFactory.CreateLogger<ExecutionEngine>();
+    private ILogger Logger { get; } = loggerFactory.CreateLogger<ExecutionEngine>();
 
     public async Task<int> InsertAsync(string tableName, string[] columns, IEnumerable<object[]> valueSets)
     {

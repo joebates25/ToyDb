@@ -1,5 +1,8 @@
 ﻿using ToyDb.Pages;
 
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+
 namespace ToyDb;
 
 public class Database : IDisposable
@@ -22,6 +25,12 @@ public class Database : IDisposable
 
     private readonly ExecutionEngine _executionEngine;
 
+    private readonly ServiceProvider _services;
+
+    private readonly ILogger _logger;
+
+    private bool _disposed;
+
 
     /*
      * Init procedure:
@@ -31,19 +40,19 @@ public class Database : IDisposable
      *
      * return initialized database object
      */
-    private Database(string filePath)
+    private Database(string filePath, ServiceProvider services, ILoggerFactory loggerFactory)
     {
-        _pageBufferManager = new PageBufferManager(
-            new FileIoManager(filePath),
-            pageBufferConfig: new PageBufferConfig(FrameCount: 2000));
+        _logger = loggerFactory.CreateLogger<Database>();
+        _logger.LogInformation("Opening database {FilePath}.", filePath);
+        _services = services;
+        _pageBufferManager = services.GetRequiredService<PageBufferManager>();
         using var headerPageLease = _pageBufferManager.LeasePageAsync<DatabaseHeaderPage>(0).Result;
         var headerPage = headerPageLease.Page;
         var welcomeValid = headerPage.WelcomeMessage == Constants.WelcomeMessage;
         if (!welcomeValid) throw new Exception("Invalid database format.");
 
-        _schemaManager   = new SchemaManager(_pageBufferManager);
-        var databaseManager = new DatabaseManager(_pageBufferManager);
-        _executionEngine = new ExecutionEngine(_pageBufferManager, _schemaManager, databaseManager);
+        _schemaManager = services.GetRequiredService<SchemaManager>();
+        _executionEngine = services.GetRequiredService<ExecutionEngine>();
 
         Info = new DatabaseInfo
         {
@@ -61,8 +70,8 @@ public class Database : IDisposable
             throw new Exception("The file already exists. Try using Open()");
         }
 
-        using var pageBuffer = new PageBufferManager(new FileIoManager(filePath),
-            pageBufferConfig: new PageBufferConfig(FrameCount: 20)); // only need a small buffer to init db
+        using var services = DatabaseServices.Create(filePath, frameCount: 20);
+        var pageBuffer = services.GetRequiredService<PageBufferManager>();
 
         using (var newHeaderPageLease = pageBuffer
                    .AllocatePageLease<DatabaseHeaderPage>(0))
@@ -79,21 +88,41 @@ public class Database : IDisposable
         return await OpenAsync(filePath);
     }
 
-    public static Task<Database> OpenAsync(string filePath) =>
-        !File.Exists(filePath)
-            ? InitializeAsync(filePath)
-            : Task.FromResult(new Database(filePath));
+    public static Task<Database> OpenAsync(string filePath)
+    {
+        if (!File.Exists(filePath)) return InitializeAsync(filePath);
+
+        var services = DatabaseServices.Create(filePath);
+        try
+        {
+            return Task.FromResult(new Database(filePath, services, services.GetRequiredService<ILoggerFactory>()));
+        }
+        catch
+        {
+            services.Dispose();
+            throw;
+        }
+    }
 
     public async Task CloseAsync()
     {
-        await _pageBufferManager.FlushAsync();
-        _pageBufferManager.Dispose();
+        if (_disposed) return;
+
+        try
+        {
+            _logger.LogInformation("Closing database {FilePath}.", Info.FilePath);
+            await _pageBufferManager.FlushAsync();
+        }
+        finally
+        {
+            _disposed = true;
+            _services.Dispose();
+        }
     }
 
     public void Dispose()
     {
-        _pageBufferManager.FlushAsync().GetAwaiter().GetResult();
-        _pageBufferManager.Dispose();
+        CloseAsync().GetAwaiter().GetResult();
     }
 
     public Task AddSchemaAsync(Schema schema)
