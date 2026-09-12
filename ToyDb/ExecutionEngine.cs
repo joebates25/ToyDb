@@ -32,39 +32,45 @@ public class ExecutionEngine(
 
         var insertPageLease = await pageBufferManager.LeasePageAsync<DataPage>(
             schemaManager.GetLastDataPageNumber(tableName));
-        insertPageLease.MarkDirty();
-        foreach (var valueSet in valueSets)
+        try
         {
-            var insertPage = insertPageLease.Page;
-            if (!TryValueSetValidation(schema, columns, valueSet, out var errorMessage))
+            insertPageLease.MarkDirty();
+            foreach (var valueSet in valueSets)
             {
-                throw new Exception(errorMessage);
-            }
+                var insertPage = insertPageLease.Page;
+                if (!TryValueSetValidation(schema, columns, valueSet, out var errorMessage))
+                {
+                    throw new Exception(errorMessage);
+                }
 
-            var rowData = ConvertDataToBytes(schema, columns, valueSet);
-            if (!HasFreeSpaceForInsert(insertPage, rowData.Length))
-            {
-                Logger.LogDebug(
-                    "Current data page {pageNumber} is full. Allocating a new data page for table {tableName}.",
+                var rowData = ConvertDataToBytes(schema, columns, valueSet);
+                if (!HasFreeSpaceForInsert(insertPage, rowData.Length))
+                {
+                    Logger.LogDebug(
+                        "Current data page {pageNumber} is full. Allocating a new data page for table {tableName}.",
+                        insertPageLease.PageNumber, tableName);
+
+                    var nextPageLease = await databaseManager.LeaseNewPage<DataPage>();
+                    nextPageLease.MarkDirty();
+                    insertPage.OverFlowPageNumber = nextPageLease.PageNumber;
+                    insertPageLease.Dispose();
+                    insertPageLease = nextPageLease;
+
+                    insertPage = insertPageLease.Page;
+                    await schemaManager.UpdateLastDataPageNumberAsync(tableName, insertPageLease.PageNumber);
+                }
+
+                Logger.LogDebug("Writing row data to data page {pageNumber} for table {tableName}.",
                     insertPageLease.PageNumber, tableName);
-                insertPageLease.Dispose();
 
-                insertPageLease = await databaseManager.LeaseNewPage<DataPage>();
-                insertPageLease.MarkDirty();
-                insertPage.OverFlowPageNumber = insertPageLease.PageNumber;
-
-                insertPage = insertPageLease.Page;
-                await schemaManager.UpdateLastDataPageNumberAsync(tableName, insertPageLease.PageNumber);
+                insertPage.InsertCell(rowData);
+                insertedRowCount++;
             }
-
-            Logger.LogDebug("Writing row data to data page {pageNumber} for table {tableName}.",
-                insertPageLease.PageNumber, tableName);
-
-            insertPage.InsertCell(rowData);
-            insertedRowCount++;
         }
-
-        insertPageLease.Dispose();
+        finally
+        {
+            insertPageLease.Dispose();
+        }
 
         return insertedRowCount;
     }

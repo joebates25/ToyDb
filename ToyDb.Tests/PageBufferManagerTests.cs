@@ -7,7 +7,49 @@ namespace ToyDb.Tests;
 public class PageBufferManagerTests
 {
     [Test]
-    public async Task EvictedFrameIsNotAlsoAddedToFreeFrames()
+    public void FailedPageInitializationReturnsFrameToUnassignedFrames()
+    {
+        var databasePath = GetTempDatabasePath();
+
+        try
+        {
+            using var manager = CreateManager(databasePath);
+
+            Assert.That(
+                () => manager.AllocatePageLease<ThrowingPage>(0),
+                Throws.TypeOf<InvalidDataException>());
+
+            using var allocatedPage = manager.AllocatePageLease<DataPage>(0);
+        }
+        finally
+        {
+            File.Delete(databasePath);
+        }
+    }
+
+    [Test]
+    public async Task PinnedDirtyPageRemainsPendingAfterFlush()
+    {
+        var databasePath = GetTempDatabasePath();
+
+        try
+        {
+            using var manager = CreateManager(databasePath);
+            var dirtyPage = manager.AllocatePageLease<DataPage>(0);
+
+            await manager.FlushAsync();
+            dirtyPage.Dispose();
+
+            using var replacementPage = manager.AllocatePageLease<DataPage>(1);
+        }
+        finally
+        {
+            File.Delete(databasePath);
+        }
+    }
+
+    [Test]
+    public async Task EvictedFrameIsNotAlsoAddedToUnassignedFrames()
     {
         var databasePath = GetTempDatabasePath();
 
@@ -72,4 +114,13 @@ public class PageBufferManagerTests
 
     private static string GetTempDatabasePath() =>
         Path.Combine(TestContext.CurrentContext.WorkDirectory, $"{Guid.NewGuid()}.toydb");
+
+    private sealed class ThrowingPage(Memory<byte> data) : Page(data), IPageFactory<ThrowingPage>
+    {
+        public static ThrowingPage CreatePage(Memory<byte> data) =>
+            throw new InvalidDataException("Page creation failed");
+
+        public static ThrowingPage InitializePage(Memory<byte> data) =>
+            throw new InvalidDataException("Page initialization failed");
+    }
 }

@@ -15,7 +15,10 @@ public class PageBufferManager : IDisposable
     private readonly Memory<byte> _bufferPool;
 
     private readonly Dictionary<PageNumber, BufferTableEntry> _pageBufferTable = new();
-    private readonly Stack<int> _freeFrames;
+
+    // Frames that currently have no page assigned. This initially contains the entire buffer pool
+    // and receives a frame again if assigning a page to it fails.
+    private readonly Stack<int> _unassignedFrames;
     private readonly IEvictionPolicy _evictionPolicy;
     private readonly HashSet<int> _dirtyPages = new();
 
@@ -24,10 +27,10 @@ public class PageBufferManager : IDisposable
     {
         var frameCount = pageBufferConfig?.FrameCount ?? 2_000;
 
-        _fileIoManager = fileIoManager;
-        _logger        = loggerFactory.CreateLogger<PageBufferManager>();
-        _bufferPool    = new byte[Constants.PageSizeBytes * frameCount];
-        _freeFrames    = new Stack<int>(Enumerable.Range(0, frameCount).Reverse());
+        _fileIoManager    = fileIoManager;
+        _logger           = loggerFactory.CreateLogger<PageBufferManager>();
+        _bufferPool       = new byte[Constants.PageSizeBytes * frameCount];
+        _unassignedFrames = new Stack<int>(Enumerable.Range(0, frameCount).Reverse());
         _evictionPolicy = new LruEvictionPolicy(
             new ReadOnlyDictionary<int, BufferTableEntry>(_pageBufferTable));
     }
@@ -43,17 +46,25 @@ public class PageBufferManager : IDisposable
                 pageNumber);
         }
 
-        // todo: if anything fails, frame stays unfree. need to fix
         var frameNumber = FreeFrame();
-        var bufferSlice = GetBufferFrame(frameNumber);
-        bufferSlice.Span.Clear();
-        _logger.Log(LogLevel.Information, "Leasing page {PageNumber}", pageNumber);
-        await _fileIoManager.ReadAsync(pageNumber * Constants.PageSizeBytes, bufferSlice);
+        try
+        {
+            var bufferSlice = GetBufferFrame(frameNumber);
+            bufferSlice.Span.Clear();
+            _logger.Log(LogLevel.Information, "Leasing page {PageNumber}", pageNumber);
+            await _fileIoManager.ReadAsync(pageNumber * Constants.PageSizeBytes, bufferSlice);
 
-        _pageBufferTable.Add(pageNumber, BufferTableEntry.Create(frameNumber));
-        _evictionPolicy.MarkPageInUse(pageNumber);
+            var page = TPage.CreatePage(bufferSlice);
+            _pageBufferTable.Add(pageNumber, BufferTableEntry.Create(frameNumber));
+            _evictionPolicy.MarkPageInUse(pageNumber);
 
-        return new PageLease<TPage>(TPage.CreatePage(bufferSlice), OnFreePage, OnDirtyPage, pageNumber);
+            return new PageLease<TPage>(page, OnFreePage, OnDirtyPage, pageNumber);
+        }
+        catch
+        {
+            ReturnUnassignedFrame(pageNumber, frameNumber);
+            throw;
+        }
     }
 
     public PageLease<TPage> AllocatePageLease<TPage>(int pageNumber) where TPage : Page, IPageFactory<TPage>
@@ -63,13 +74,21 @@ public class PageBufferManager : IDisposable
             throw new InvalidOperationException($"Page {pageNumber} already allocated");
 
         var firstFreeFrameNumber = FreeFrame();
-        var bufferSlice =
-            _bufferPool.Slice(firstFreeFrameNumber * Constants.PageSizeBytes, Constants.PageSizeBytes);
-        bufferSlice.Span.Fill(0);
-        _pageBufferTable.Add(pageNumber, BufferTableEntry.CreateDirty(firstFreeFrameNumber));
-        _dirtyPages.Add(pageNumber);
+        try
+        {
+            var bufferSlice = GetBufferFrame(firstFreeFrameNumber);
+            bufferSlice.Span.Clear();
+            var page = TPage.InitializePage(bufferSlice);
+            _pageBufferTable.Add(pageNumber, BufferTableEntry.CreateDirty(firstFreeFrameNumber));
+            _dirtyPages.Add(pageNumber);
 
-        return new PageLease<TPage>(TPage.InitializePage(bufferSlice), OnFreePage, OnDirtyPage, pageNumber);
+            return new PageLease<TPage>(page, OnFreePage, OnDirtyPage, pageNumber);
+        }
+        catch
+        {
+            ReturnUnassignedFrame(pageNumber, firstFreeFrameNumber);
+            throw;
+        }
     }
 
     private void OnFreePage(int pageNumber)
@@ -94,7 +113,7 @@ public class PageBufferManager : IDisposable
     public async Task FlushAsync()
     {
         _logger.Log(LogLevel.Information, "Flushing page buffers");
-        foreach (var dirtyPage in _dirtyPages)
+        foreach (var dirtyPage in _dirtyPages.ToArray())
         {
             var dirtyFrame = _pageBufferTable[dirtyPage];
             if (dirtyFrame.InUse) continue;
@@ -103,11 +122,11 @@ public class PageBufferManager : IDisposable
                 (ReadOnlyMemory<byte>) GetBufferFrame(dirtyFrame.FrameNumber);
             await _fileIoManager.WriteAsync(dirtyPage * Constants.PageSizeBytes, pageMemory);
             _pageBufferTable[dirtyPage] = dirtyFrame with {Dirty = false};
+            _dirtyPages.Remove(dirtyPage);
             _evictionPolicy.MarkPageNotInUse(dirtyPage);
             _logger.Log(LogLevel.Information, "Flushed dirty page {PageNumber} to disk", dirtyPage);
         }
 
-        _dirtyPages.Clear();
         await _fileIoManager.FlushAsync();
     }
 
@@ -121,8 +140,8 @@ public class PageBufferManager : IDisposable
     {
         // todo: perhaps eventually there's a timeout/retry mechanism to wait for a frame to become available,
         // but for now we will just throw an exception.
-        if (_freeFrames.Count > 0)
-            return _freeFrames.Pop();
+        if (_unassignedFrames.Count > 0)
+            return _unassignedFrames.Pop();
 
         if (TryEvictPage(out var freeFrameNumber))
             return freeFrameNumber;
@@ -149,6 +168,19 @@ public class PageBufferManager : IDisposable
             .Key;
         _pageBufferTable.Remove(pageNumber);
         return true;
+    }
+
+    private void ReturnUnassignedFrame(int pageNumber, int frameNumber)
+    {
+        if (_pageBufferTable.TryGetValue(pageNumber, out var entry)
+            && entry.FrameNumber == frameNumber)
+        {
+            _pageBufferTable.Remove(pageNumber);
+            _dirtyPages.Remove(pageNumber);
+            _evictionPolicy.MarkPageInUse(pageNumber);
+        }
+
+        _unassignedFrames.Push(frameNumber);
     }
 
     private bool HasPage(int pageNumber) => _pageBufferTable.ContainsKey(pageNumber);
