@@ -78,9 +78,14 @@ public class ExecutionEngine(
     public IAsyncEnumerable<object[]> SelectAsync(
         SelectExpression selectExpression)
     {
+        var schema = schemaManager.GetSchema(selectExpression.TableName);
+        var columns = selectExpression.Columns.Count == 1 && selectExpression.Columns[0] == "*"
+            ? schema.Fields.Select(field => field.Name).ToArray()
+            : selectExpression.Columns.ToArray();
+
         return SelectAsync(
             selectExpression.TableName,
-            selectExpression.Columns.ToArray(),
+            columns,
             selectExpression.WhereExpressions?.Select(where => new QueryFilter(
                 where.ColumnName,
                 where.Operator.Operator switch
@@ -93,7 +98,15 @@ public class ExecutionEngine(
                         where.Operator,
                         "Unknown query filter operator.")
                 },
-                where.Value)).ToArray());
+                CoerceParsedValue(schema, where.ColumnName, where.Value))).ToArray());
+    }
+
+    private static object CoerceParsedValue(Schema schema, string columnName, object value)
+    {
+        var field = schema.Fields.FirstOrDefault(field => field.Name == columnName);
+        return field?.Type == SchemaFieldType.Long && value is int intValue
+            ? (long) intValue
+            : value;
     }
 
     public async IAsyncEnumerable<object[]> SelectAsync(

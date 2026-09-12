@@ -20,40 +20,30 @@ else
     Console.WriteLine("Using the existing database. Pass --reset to rebuild the sample data.");
 }
 
-using var database = await Database.OpenAsync(dbLocation, new DatabaseConfig { FrameCount = 20 });
+using var database = await Database.OpenAsync(dbLocation, new DatabaseConfig {FrameCount = 20});
 
 await PrintRowsAsync(
     database,
-    tableName: "Customers",
-    columns: ["Id", "FullName", "City", "LoyaltyPoints", "IsActive"],
+    heading: "Customers",
+    sql:
+    "SELECT Id, FullName, City, LoyaltyPoints, IsActive FROM Customers WHERE LoyaltyPoints > 3999 AND IsActive = true",
     maximumRows: 8,
     format: row =>
-        $"#{row[0],4}  {row[1],-24}  {row[2],-14}  points: {row[3],5}  active: {row[4]}",
-    filter:
-    [
-        new QueryFilter("LoyaltyPoints", QueryFilterOperator.GreaterThanOrEqualTo, 4_000),
-        new QueryFilter("IsActive", QueryFilterOperator.EqualTo, true)
-    ]);
+        $"#{row[0],4}  {row[1],-24}  {row[2],-14}  points: {row[3],5}  active: {row[4]}");
 
 await PrintRowsAsync(
     database,
-    tableName: "Products",
-    columns: ["Sku", "Name", "Category", "PriceInCents", "UnitsInStock"],
+    heading: "Products",
+    sql: "SELECT Sku, Name, Category, PriceInCents, UnitsInStock FROM Products WHERE PriceInCents < 8000 AND UnitsInStock > 20",
     maximumRows: 10,
     format: row =>
-        $"{row[0],-10}  {row[1],-35}  {row[2],-16}  {FormatMoney((long) row[3]),9}  stock: {row[4]}",
-    filter:
-    [
-        new QueryFilter("PriceInCents", QueryFilterOperator.LessThan, 8_000L),
-        new QueryFilter("UnitsInStock", QueryFilterOperator.GreaterThan, 20)
-    ]);
+        $"{row[0],-10}  {row[1],-35}  {row[2],-16}  {FormatMoney((long) row[3]),9}  stock: {row[4]}");
 
-Console.WriteLine("\nRecent completed orders (filtered by the caller):");
+Console.WriteLine("\nRecent completed orders:");
+
 var displayedOrders = 0;
-await foreach (var row in database.SelectAsync(
-                   "Orders",
-                   ["Id", "CustomerId", "PlacedAtUnixSeconds", "TotalInCents", "IsComplete"],
-                   [new QueryFilter("IsComplete", QueryFilterOperator.EqualTo, true)]))
+await foreach (var row in database.ExecuteSqlQuery(
+                   "SELECT Id, CustomerId, PlacedAtUnixSeconds, TotalInCents FROM Orders WHERE IsComplete = true"))
 {
     var placedAt = DateTimeOffset.FromUnixTimeSeconds((long) row[2]);
     Console.WriteLine(
@@ -65,9 +55,9 @@ await foreach (var row in database.SelectAsync(
     }
 }
 
-var customerCount = await CountRowsAsync(database, "Customers", "Id");
-var productCount = await CountRowsAsync(database, "Products", "Id");
-var orderCount = await CountRowsAsync(database, "Orders", "Id");
+var customerCount = await CountRowsAsync(database, "SELECT Id FROM Customers");
+var productCount = await CountRowsAsync(database, "SELECT Id FROM Products");
+var orderCount = await CountRowsAsync(database, "SELECT Id FROM Orders");
 
 Console.WriteLine($"\nTotals read through projected selects: {customerCount} customers, " +
                   $"{productCount} products, {orderCount} orders.");
@@ -80,7 +70,7 @@ static async Task CreateAndSeedDatabaseAsync(string dbLocation)
     var customerRows = BuildCustomerRows(120);
     int insertedCustomers = 0;
 
-        var database = await Database.OpenAsync(dbLocation, new DatabaseConfig { FrameCount = 20 });    
+    var database = await Database.OpenAsync(dbLocation, new DatabaseConfig {FrameCount = 20});
 
     await database.AddSchemaAsync(
         new Schema("Customers")
@@ -243,16 +233,15 @@ static object[][] BuildOrderRows(int count, int customerCount)
 
 static async Task PrintRowsAsync(
     Database database,
-    string tableName,
-    string[] columns,
+    string heading,
+    string sql,
     int maximumRows,
-    Func<object[], string> format,
-    QueryFilter[]? filter = null)
+    Func<object[], string> format)
 {
-    Console.WriteLine($"\n{tableName} sample:");
+    Console.WriteLine($"\n{heading} sample:");
 
     var displayedRows = 0;
-    await foreach (var row in database.SelectAsync(tableName, columns, filter))
+    await foreach (var row in database.ExecuteSqlQuery(sql))
     {
         Console.WriteLine(format(row));
         if (++displayedRows == maximumRows)
@@ -262,10 +251,10 @@ static async Task PrintRowsAsync(
     }
 }
 
-static async Task<int> CountRowsAsync(Database database, string tableName, string identityColumn)
+static async Task<int> CountRowsAsync(Database database, string sql)
 {
     var count = 0;
-    await foreach (var _ in database.SelectAsync(tableName, [identityColumn]))
+    await foreach (var _ in database.ExecuteSqlQuery(sql))
     {
         count++;
     }

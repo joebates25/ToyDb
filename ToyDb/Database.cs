@@ -1,7 +1,7 @@
 ﻿using ToyDb.Pages;
-
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using ToyDb.AST;
 
 namespace ToyDb;
 
@@ -31,7 +31,6 @@ public class Database : IDisposable
 
     private bool _disposed;
 
-
     /*
      * Init procedure:
      * Start up page buffer
@@ -44,14 +43,14 @@ public class Database : IDisposable
     {
         _logger = loggerFactory.CreateLogger<Database>();
         _logger.LogInformation("Opening database {FilePath}.", filePath);
-        _services = services;
+        _services          = services;
         _pageBufferManager = services.GetRequiredService<PageBufferManager>();
         using var headerPageLease = _pageBufferManager.LeasePageAsync<DatabaseHeaderPage>(0).Result;
         var headerPage = headerPageLease.Page;
         var welcomeValid = headerPage.WelcomeMessage == Constants.WelcomeMessage;
         if (!welcomeValid) throw new Exception("Invalid database format.");
 
-        _schemaManager = services.GetRequiredService<SchemaManager>();
+        _schemaManager   = services.GetRequiredService<SchemaManager>();
         _executionEngine = services.GetRequiredService<ExecutionEngine>();
 
         Info = new DatabaseInfo
@@ -59,7 +58,7 @@ public class Database : IDisposable
             Version                   = headerPage.Version,
             PageCount                 = headerPage.PageCount,
             SchemaDirectoryPageNumber = headerPage.SchemaDirectoryPageNumber,
-            FilePath = filePath
+            FilePath                  = filePath
         };
     }
 
@@ -70,7 +69,7 @@ public class Database : IDisposable
             throw new Exception("The file already exists. Try using Open()");
         }
 
-        config ??= new DatabaseConfig { FrameCount = 20 };
+        config ??= new DatabaseConfig {FrameCount = 20};
         using var services = DatabaseServices.Create(filePath, config);
         var pageBuffer = services.GetRequiredService<PageBufferManager>();
 
@@ -85,6 +84,7 @@ public class Database : IDisposable
                 newHeaderPage.PageCount                 = 2;
             }
         }
+
         await pageBuffer.FlushAsync();
         return await OpenAsync(filePath);
     }
@@ -135,7 +135,7 @@ public class Database : IDisposable
     {
         return _schemaManager.RemoveSchemaAsync(schemaName);
     }
-    
+
     public Schema GetSchema(string schemaName)
     {
         return _schemaManager.GetSchema(schemaName);
@@ -159,6 +159,26 @@ public class Database : IDisposable
         QueryFilter[]? filter = null)
     {
         return _executionEngine.SelectAsync(tableName, columns, filter);
+    }
+
+    public IAsyncEnumerable<object[]> ExecuteSqlQuery(string sql)
+    {
+        IExpression parsedExpression;
+        try
+        {
+            parsedExpression = new Parser().Parse(sql);
+        }
+        catch (Exception e)
+        {
+            throw new Exception($"Failed to parse SQL: {sql}. Error: {e.Message}", e);
+        }
+
+        if (parsedExpression is not SelectExpression expression)
+        {
+            throw new NotSupportedException($"Only SELECT statements are supported. SQL: {sql}");
+        }
+
+        return _executionEngine.SelectAsync(expression);
     }
 }
 
