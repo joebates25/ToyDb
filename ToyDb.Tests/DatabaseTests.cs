@@ -75,7 +75,7 @@ public class DatabaseTests
             await testDatabase.InsertAsync("TestSchema", ["field1"],
                 Enumerable.Range(0, 50000).Select(i => new object[] {i}).ToArray());
             // Get n row and verify it is correct
-            var results = await testDatabase.SelectAsync("TestSchema", ["field1"]).ToListAsync();
+            var results = await testDatabase.ExecuteSqlQuery("SELECT field1 FROM TestSchema").ToListAsync();
             Assert.That(results.Count, Is.EqualTo(50000));
             Assert.That(results[0][0], Is.EqualTo(0));
             await testDatabase.CloseAsync();
@@ -149,7 +149,7 @@ public class DatabaseTests
             {
                 await database.InsertAsync("TestSchema", ["field1"], [["reopened"]]);
 
-                var results = await database.SelectAsync("TestSchema", ["field1"]).ToListAsync();
+                var results = await database.ExecuteSqlQuery("SELECT field1 FROM TestSchema").ToListAsync();
                 Assert.That(results, Has.Count.EqualTo(22));
             }
         }

@@ -101,15 +101,8 @@ public class ExecutionEngine(
                 CoerceParsedValue(schema, where.ColumnName, where.Value))).ToArray());
     }
 
-    private static object CoerceParsedValue(Schema schema, string columnName, object value)
-    {
-        var field = schema.Fields.FirstOrDefault(field => field.Name == columnName);
-        return field?.Type == SchemaFieldType.Long && value is int intValue
-            ? (long) intValue
-            : value;
-    }
 
-    public async IAsyncEnumerable<object[]> SelectAsync(
+    private async IAsyncEnumerable<object[]> SelectAsync(
         string tableName,
         string[] columns,
         QueryFilter[]? filter = null)
@@ -192,6 +185,13 @@ public class ExecutionEngine(
         } while (dataPageNumber != -1);
 
         return deleteCount;
+    }
+    private static object CoerceParsedValue(Schema schema, string columnName, object value)
+    {
+        var field = schema.Fields.FirstOrDefault(field => field.Name == columnName);
+        return field?.Type == SchemaFieldType.Long && value is int intValue
+            ? (long) intValue
+            : value;
     }
 
     private bool DataRowPassesFilter(Schema schema, Memory<byte> dataRow, QueryFilter[]? filter)

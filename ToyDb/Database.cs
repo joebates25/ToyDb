@@ -153,14 +153,6 @@ public class Database : IDisposable
         return _executionEngine.DeleteAsync(tableName, filter);
     }
 
-    public IAsyncEnumerable<object[]> SelectAsync(
-        string tableName,
-        string[] columns,
-        QueryFilter[]? filter = null)
-    {
-        return _executionEngine.SelectAsync(tableName, columns, filter);
-    }
-
     public IAsyncEnumerable<object[]> ExecuteSqlQuery(string sql)
     {
         IExpression parsedExpression;
